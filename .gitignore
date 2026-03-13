@@ -3,3 +3,14 @@
 *.tiff
 *.pdf
 Result/
+TestResult/
+
+# Temp/test scripts
+debug_*.r
+test_*.r
+run_wf1.r
+
+# MetaboAnalystR cache
+*.qs
+*.csv
+!MetaboFlow_v1.r
