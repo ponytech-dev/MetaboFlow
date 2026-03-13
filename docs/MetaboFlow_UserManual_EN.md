@@ -228,6 +228,13 @@ ALPHA          <- 0.05                        # FDR-adjusted p-value threshold
 CONTROL_GROUP  <- "control"                   # Must match filename prefix
 MODEL_GROUP    <- "DrugA"                     # Must match filename prefix
 DB_DIR         <- "path/to/your/database"     # In-house database directory
+
+## Pathway plot settings
+TOP_N_PATHWAYS <- 0                           # Max pathways in plot (0=all significant)
+PATHWAY_FIG_W  <- 7                           # Pathway figure width (inches)
+PATHWAY_FIG_H  <- 5                           # Pathway figure height (inches)
+SUBFIG_MODE    <- FALSE                       # Small sub-figure mode (larger text)
+DB_DIR         <- "path/to/your/database"     # In-house database directory
 ```
 
 ### Parameter Reference
@@ -248,6 +255,18 @@ DB_DIR         <- "path/to/your/database"     # In-house database directory
 | `NOISE_LEVEL` | `500` | Instrument noise level |
 | `MIN_FRACTION` | `0.5` | Minimum fraction of samples a peak must appear in |
 | `NORM_METHOD` | `"median"` | Normalization: `"median"` / `"mean"` / `"sum"` / `"pqn"` |
+| `TOP_N_PATHWAYS` | `0` | Max pathways displayed in enrichment plots. 0=all significant |
+| `PATHWAY_FIG_W` | `7` | Pathway figure width (inches). Use 3.5 for paper sub-figures |
+| `PATHWAY_FIG_H` | `5` | Pathway figure height (inches). Use 3 for paper sub-figures |
+| `SUBFIG_MODE` | `FALSE` | Small sub-figure mode. When `TRUE`, auto-enlarges fonts for paper panels |
+
+### Non-Specific Pathway Filter
+
+MetaboFlow automatically filters overly broad pathways that appear significant in virtually any dataset:
+- "Metabolic pathways", "Biosynthesis of secondary metabolites", "Carbon metabolism", etc.
+- Pathways with >150 total metabolites
+
+Filtered results are saved as `*_filtered.xlsx`; unfiltered results are in `*.xlsx`. Plots use filtered data by default.
 
 ### Common KEGG Organism Codes
 

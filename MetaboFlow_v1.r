@@ -51,15 +51,42 @@ install_bioc <- function(pkg) {
 }
 
 ## --- 0.3 CRAN包 / CRAN packages ---
-cran_pkgs <- c("tidyverse", "openxlsx", "ggrepel", "pheatmap", "ggpubr",
-               "ggsci", "patchwork", "remotes", "Cairo", "qs", "survival")
+## 数据处理 + 绘图 + 统计 + IO 完整列表 / Full list: data, plotting, stats, IO
+cran_pkgs <- c(
+  ## 核心数据处理 / Core data processing
+  "tidyverse", "dplyr", "tidyr", "readr", "stringr", "purrr", "tibble", "forcats",
+  ## IO
+  "openxlsx", "readxl",
+  ## 绘图 / Plotting
+  "ggplot2", "ggrepel", "pheatmap", "ggpubr", "ggsci", "patchwork",
+  "scales", "RColorBrewer", "viridis", "gridExtra",
+  ## 图形设备 / Graphics device
+  "Cairo",
+  ## 安装工具 / Install tools
+  "remotes",
+  ## MetaboAnalystR运行时依赖 / MetaboAnalystR runtime deps
+  "qs", "survival",
+  ## 统计辅助 / Statistical helpers
+  "broom"
+)
 invisible(lapply(cran_pkgs, install_cran))
 
 ## --- 0.4 Bioconductor包 / Bioconductor packages ---
-bioc_pkgs <- c("Biobase", "limma", "KEGGREST", "globaltest",
-               "impute", "pcaMethods", "preprocessCore", "genefilter",
-               "sva", "KEGGgraph", "BiocParallel", "multtest", "RBGL",
-               "Rgraphviz", "edgeR", "fgsea", "MSnbase", "xcms")
+## 色谱峰提取 + 差异分析 + 通路分析 + 富集分析 完整列表
+bioc_pkgs <- c(
+  ## 差异分析 / Differential analysis
+  "Biobase", "limma",
+  ## 通路分析 / Pathway analysis
+  "KEGGREST", "globaltest", "KEGGgraph",
+  ## XCMS色谱峰处理 / XCMS peak processing
+  "xcms", "MSnbase", "BiocParallel",
+  ## 数据预处理 / Data preprocessing
+  "impute", "pcaMethods", "preprocessCore", "genefilter", "sva",
+  ## 统计/富集 / Stats/enrichment
+  "multtest", "edgeR", "fgsea",
+  ## 图结构 / Graph structures
+  "RBGL", "Rgraphviz"
+)
 invisible(lapply(bioc_pkgs, install_bioc))
 
 ## --- 0.5 tidymass / tidymass suite ---
@@ -163,13 +190,21 @@ MODEL_GROUP    <- "MethiocarbA"  # 模型组名称 / model group name (must matc
 ## 数据库路径 / Database paths
 DB_DIR <- "path/to/your/inhouse_database"
 
+## 通路图设置 / Pathway plot settings
+TOP_N_PATHWAYS  <- 0          # 图中最多显示通路数 / Max pathways in plot (0=all significant)
+PATHWAY_FIG_W   <- 7          # 通路图宽度(英寸) / Pathway figure width (inches)
+PATHWAY_FIG_H   <- 5          # 通路图高度(英寸) / Pathway figure height (inches)
+SUBFIG_MODE     <- FALSE      # 小子图模式：更大字体+紧凑布局 / Small sub-figure mode
+
 ## ▲▲▲ 参数区结束 ▲▲▲
 
 
 ## ========================= 2. Nature级别绘图主题 / Nature-Quality Plot Theme =========================
 
 ## --- 2.1 统一主题 / Unified theme ---
+## SUBFIG_MODE=TRUE时自动放大字体以适应论文小子图 / Auto-enlarge font for paper sub-figures
 theme_nature <- function(base_size = 8) {
+  if (exists("SUBFIG_MODE") && isTRUE(SUBFIG_MODE)) base_size <- base_size + 3
   theme_bw(base_size = base_size) %+replace%
     theme(
       text = element_text(family = "Arial", color = "black"),
@@ -220,15 +255,69 @@ normalize_hmdb <- function(ids) {
 }
 
 
+## ========================= 2.6 非特异性通路过滤 / Non-specific Pathway Filter =========================
+## 这些通路过于宽泛，几乎在任何代谢组数据中都会显著，属于假阳性
+## These pathways are too broad — they appear significant in virtually any metabolomics dataset
+
+NONSPECIFIC_KEYWORDS <- c(
+  "Metabolic pathways",
+  "Biosynthesis of secondary metabolites",
+  "Biosynthesis of amino acids",
+  "Carbon metabolism",
+  "2-Oxocarboxylic acid metabolism",
+  "Biosynthesis of cofactors",
+  "ABC transporters",
+  "Protein digestion and absorption",
+  "Mineral absorption",
+  "Aminoacyl-tRNA biosynthesis"
+)
+
+## 最大通路代谢物数阈值：超过此值的通路被视为非特异性
+## Pathways with more metabolites than this threshold are considered non-specific
+NONSPECIFIC_SIZE_CUTOFF <- 150
+
+## 通路过滤函数 / Pathway filter function
+## 输入: 通路结果df + 通路名列 + 通路大小列(可选)
+## Returns: list(all=原始显著, filtered=过滤后)
+filter_nonspecific <- function(df, name_col = "pathway_name", size_col = NULL) {
+  if (nrow(df) == 0) return(list(all = df, filtered = df))
+
+  ## 关键词匹配过滤 / Keyword match filter
+  blacklist_hit <- sapply(df[[name_col]], function(pw) {
+    any(sapply(NONSPECIFIC_KEYWORDS, function(kw) grepl(kw, pw, ignore.case = TRUE)))
+  })
+
+  ## 通路大小过滤 / Size-based filter
+  size_hit <- rep(FALSE, nrow(df))
+  if (!is.null(size_col) && size_col %in% colnames(df)) {
+    size_hit <- df[[size_col]] > NONSPECIFIC_SIZE_CUTOFF
+  }
+
+  keep <- !(blacklist_hit | size_hit)
+  list(all = df, filtered = df[keep, ])
+}
+
+## 通路图数据准备函数 / Prepare plot data respecting TOP_N_PATHWAYS
+prep_pathway_plot <- function(df, n_col = NULL) {
+  if (nrow(df) == 0) return(df)
+  n <- if (exists("TOP_N_PATHWAYS") && TOP_N_PATHWAYS > 0) TOP_N_PATHWAYS else nrow(df)
+  n <- min(n, nrow(df))
+  df[seq_len(n), ]
+}
+
+
 ## ========================= 3. 数据处理 / Data Processing =========================
 
 rm(list = setdiff(ls(), c("WORK_DIR","POLARITY","LOGFC_CUTOFF","ALPHA","ORGANISM",
                            "MS1_PPM","PEAK_WIDTH","SN_THRESH","NOISE_LEVEL",
                            "MIN_FRACTION","N_THREADS","INTENSITY_FLOOR","NORM_METHOD",
-                           "CONTROL_GROUP","MODEL_GROUP",
-                           "DB_DIR","theme_nature","nature_colors","pathway_gradient",
+                           "CONTROL_GROUP","MODEL_GROUP","DB_DIR",
+                           "TOP_N_PATHWAYS","PATHWAY_FIG_W","PATHWAY_FIG_H","SUBFIG_MODE",
+                           "NONSPECIFIC_KEYWORDS","NONSPECIFIC_SIZE_CUTOFF",
+                           "theme_nature","nature_colors","pathway_gradient",
                            "volcano_colors","heatmap_colors","save_nature_plot",
-                           "has_metaboanalyst","has_tidymass","normalize_hmdb")))
+                           "has_metaboanalyst","has_tidymass","normalize_hmdb",
+                           "filter_nonspecific","prep_pathway_plot")))
 
 setwd(WORK_DIR)
 
@@ -470,12 +559,21 @@ for (fi in seq_along(files)) {
       pw1 <- res1@result
       pw1 <- pw1[pw1$p_value < 0.05 & pw1$pathway_class == "Metabolic;primary_pathway", ]
       pw1 <- arrange(pw1, desc(mapped_number))
-      write.xlsx(pw1, paste0("差异代谢物/smpdb_", prefix, ".xlsx"))
 
-      if (nrow(pw1) > 0) {
-        pw1$neg_log_p <- -log10(pw1$p_value)
-        pw_plot <- if (nrow(pw1) <= 12) pw1 else pw1[1:12, ]
+      ## 全部显著 + 过滤非特异性 / All significant + filtered
+      pw1_filt <- filter_nonspecific(pw1, name_col = "pathway_name", size_col = "all_number")
+      write.xlsx(pw1_filt$all, paste0("差异代谢物/smpdb_", prefix, ".xlsx"))
+      if (nrow(pw1_filt$filtered) < nrow(pw1_filt$all)) {
+        write.xlsx(pw1_filt$filtered, paste0("差异代谢物/smpdb_", prefix, "_filtered.xlsx"))
+      }
+
+      ## 绘图用过滤后数据 / Plot uses filtered data
+      pw1_plot_data <- pw1_filt$filtered
+      if (nrow(pw1_plot_data) > 0) {
+        pw1_plot_data$neg_log_p <- -log10(pw1_plot_data$p_value)
+        pw_plot <- prep_pathway_plot(pw1_plot_data)
         pw_plot$pathway_name <- factor(pw_plot$pathway_name, levels = rev(pw_plot$pathway_name))
+        y_text_size <- if (SUBFIG_MODE) 9 else 8
 
         p_wf1 <- ggplot(pw_plot, aes(x = mapped_number, y = pathway_name)) +
           geom_point(aes(size = neg_log_p, color = mapped_number)) +
@@ -483,12 +581,14 @@ for (fi in seq_along(files)) {
           labs(title = "SMPDB Pathway Enrichment (WF1-ORA)", x = "Mapped compounds") +
           theme_nature(base_size = 8) +
           theme(aspect.ratio = NULL, axis.title.y = element_blank(),
-                axis.text.y = element_text(size = 8)) +
+                axis.text.y = element_text(size = y_text_size)) +
           scale_size(range = c(3, 9))
 
-        save_nature_plot(p_wf1, paste0("差异代谢物/smpdb_", prefix), width = 7, height = 5)
+        save_nature_plot(p_wf1, paste0("差异代谢物/smpdb_", prefix),
+                         width = PATHWAY_FIG_W, height = PATHWAY_FIG_H)
       }
-      cat(" 完成/done (", nrow(pw1), "条通路/pathways)\n")
+      cat(" 完成/done (", nrow(pw1_filt$all), "全部/all,",
+          nrow(pw1_filt$filtered), "过滤后/filtered)\n")
     }, error = function(e) cat(" 失败/failed:", conditionMessage(e), "\n"))
   } else {
     cat(" 跳过/skipped\n")
@@ -510,15 +610,23 @@ for (fi in seq_along(files)) {
         msea_res <- as.data.frame(mSet$analSet$ora.mat)
         msea_res$pathway <- rownames(msea_res)
         msea_res <- msea_res[order(msea_res[, "Raw p"]), ]
-        write.xlsx(msea_res, paste0("差异代谢物/msea_", prefix, ".xlsx"))
 
-        msea_sig <- msea_res[msea_res[, "Raw p"] < 0.05, ]
+        ## 全部 + 过滤 / All + filtered
+        total_col <- if ("Total" %in% colnames(msea_res)) "Total" else "total"
+        msea_filt <- filter_nonspecific(msea_res, name_col = "pathway",
+                                         size_col = if (total_col %in% colnames(msea_res)) total_col else NULL)
+        write.xlsx(msea_filt$all, paste0("差异代谢物/msea_", prefix, ".xlsx"))
+        if (nrow(msea_filt$filtered) < nrow(msea_filt$all)) {
+          write.xlsx(msea_filt$filtered, paste0("差异代谢物/msea_", prefix, "_filtered.xlsx"))
+        }
+
+        msea_sig <- msea_filt$filtered[msea_filt$filtered[, "Raw p"] < 0.05, ]
         if (nrow(msea_sig) > 0) {
           msea_sig$neg_log_p <- -log10(msea_sig[, "Raw p"])
-          pw_plot <- if (nrow(msea_sig) <= 12) msea_sig else msea_sig[1:12, ]
+          pw_plot <- prep_pathway_plot(msea_sig)
           pw_plot$pathway <- factor(pw_plot$pathway, levels = rev(pw_plot$pathway))
+          y_text_size <- if (SUBFIG_MODE) 9 else 8
 
-          ## MetaboAnalystR 4.x 返回小写列名 / Returns lowercase column names
           hits_col <- if ("hits" %in% colnames(pw_plot)) "hits" else "Hits"
           expected_col <- if ("expected" %in% colnames(pw_plot)) "expected" else "Expected"
 
@@ -528,12 +636,14 @@ for (fi in seq_along(files)) {
             labs(title = "MSEA Enrichment (WF2-ORA)", x = "Hits") +
             theme_nature(base_size = 8) +
             theme(aspect.ratio = NULL, axis.title.y = element_blank(),
-                  axis.text.y = element_text(size = 8)) +
+                  axis.text.y = element_text(size = y_text_size)) +
             scale_size(range = c(3, 9))
 
-          save_nature_plot(p_wf2, paste0("差异代谢物/msea_", prefix), width = 7, height = 5)
+          save_nature_plot(p_wf2, paste0("差异代谢物/msea_", prefix),
+                           width = PATHWAY_FIG_W, height = PATHWAY_FIG_H)
         }
-        cat(" 完成/done (", nrow(msea_res), "行/rows)\n")
+        cat(" 完成/done (", nrow(msea_filt$all), "全部/all,",
+            nrow(msea_filt$filtered), "过滤后/filtered)\n")
       }
     }, error = function(e) cat(" 失败/failed:", conditionMessage(e), "\n"))
   } else {
@@ -594,10 +704,18 @@ for (fi in seq_along(files)) {
 
       kegg_results <- kegg_results[order(kegg_results$Raw_p), ]
       kegg_results$FDR <- p.adjust(kegg_results$Raw_p, method = "BH")
-      write.xlsx(kegg_results, paste0("差异代谢物/kegg_", prefix, ".xlsx"))
 
-      kegg_results$neg_log_p <- -log10(kegg_results$Raw_p)
-      kegg_plot <- if (nrow(kegg_results) > 25) kegg_results[1:25, ] else kegg_results
+      ## 全部 + 过滤 / All + filtered
+      kegg_filt <- filter_nonspecific(kegg_results, name_col = "pathway", size_col = "Total")
+      write.xlsx(kegg_filt$all, paste0("差异代谢物/kegg_", prefix, ".xlsx"))
+      if (nrow(kegg_filt$filtered) < nrow(kegg_filt$all)) {
+        write.xlsx(kegg_filt$filtered, paste0("差异代谢物/kegg_", prefix, "_filtered.xlsx"))
+      }
+
+      kegg_plot_data <- kegg_filt$filtered
+      kegg_plot_data$neg_log_p <- -log10(kegg_plot_data$Raw_p)
+      kegg_plot <- prep_pathway_plot(kegg_plot_data)
+      label_size <- if (SUBFIG_MODE) 3.2 else 2.5
 
       if (nrow(kegg_plot) > 0) {
         p_mv <- ggplot(kegg_plot, aes(x = Hits, y = neg_log_p)) +
@@ -608,7 +726,7 @@ for (fi in seq_along(files)) {
           geom_hline(yintercept = -log10(0.05), lty = 2, color = "grey50", linewidth = 0.3) +
           ggrepel::geom_text_repel(
             data = kegg_plot[kegg_plot$Raw_p < 0.1 | kegg_plot$Hits >= 3, ],
-            aes(label = pathway), size = 2.5, max.overlaps = 15,
+            aes(label = pathway), size = label_size, max.overlaps = 15,
             segment.color = "grey60", segment.size = 0.3
           ) +
           labs(x = "Hits", y = expression("-log"[10]*"(p-value)"),
@@ -617,9 +735,10 @@ for (fi in seq_along(files)) {
           theme_nature(base_size = 8)
 
         save_nature_plot(p_mv, paste0("差异代谢物/kegg_metabolome_view_", prefix),
-                         width = 6, height = 5.5)
+                         width = PATHWAY_FIG_W, height = PATHWAY_FIG_H + 0.5)
       }
-      cat(" 完成/done (", nrow(kegg_results), "条通路/pathways)\n")
+      cat(" 完成/done (", nrow(kegg_filt$all), "全部/all,",
+          nrow(kegg_filt$filtered), "过滤后/filtered)\n")
     }, error = function(e) cat(" 失败/failed:", conditionMessage(e), "\n"))
   } else {
     cat(" 跳过/skipped\n")
@@ -694,13 +813,20 @@ for (fi in seq_along(files)) {
         }
         qea_results <- qea_results[order(qea_results$p_value), ]
         qea_results$FDR <- p.adjust(qea_results$p_value, method = "BH")
-        write.xlsx(qea_results, paste0("差异代谢物/qea_", prefix, ".xlsx"))
 
-        qea_sig <- qea_results[qea_results$p_value < 0.05, ]
+        ## 全部 + 过滤 / All + filtered
+        qea_filt <- filter_nonspecific(qea_results, name_col = "pathway")
+        write.xlsx(qea_filt$all, paste0("差异代谢物/qea_", prefix, ".xlsx"))
+        if (nrow(qea_filt$filtered) < nrow(qea_filt$all)) {
+          write.xlsx(qea_filt$filtered, paste0("差异代谢物/qea_", prefix, "_filtered.xlsx"))
+        }
+
+        qea_sig <- qea_filt$filtered[qea_filt$filtered$p_value < 0.05, ]
         if (nrow(qea_sig) > 0) {
           qea_sig$neg_log_p <- -log10(qea_sig$p_value)
-          pw_plot <- if (nrow(qea_sig) <= 12) qea_sig else qea_sig[1:12, ]
+          pw_plot <- prep_pathway_plot(qea_sig)
           pw_plot$pathway <- factor(pw_plot$pathway, levels = rev(pw_plot$pathway))
+          y_text_size <- if (SUBFIG_MODE) 9 else 8
 
           p_wf4 <- ggplot(pw_plot, aes(x = hits, y = pathway)) +
             geom_point(aes(size = neg_log_p, color = statistic)) +
@@ -708,12 +834,14 @@ for (fi in seq_along(files)) {
             labs(title = "QEA Enrichment (WF4-GlobalTest)", x = "Hits") +
             theme_nature(base_size = 8) +
             theme(aspect.ratio = NULL, axis.title.y = element_blank(),
-                  axis.text.y = element_text(size = 8)) +
+                  axis.text.y = element_text(size = y_text_size)) +
             scale_size(range = c(3, 9))
 
-          save_nature_plot(p_wf4, paste0("差异代谢物/qea_", prefix), width = 7, height = 5)
+          save_nature_plot(p_wf4, paste0("差异代谢物/qea_", prefix),
+                           width = PATHWAY_FIG_W, height = PATHWAY_FIG_H)
         }
-        cat(" 完成/done (", nrow(qea_results), "条通路/pathways)\n")
+        cat(" 完成/done (", nrow(qea_filt$all), "全部/all,",
+            nrow(qea_filt$filtered), "过滤后/filtered)\n")
       } else {
         cat(" 无足够通路映射/not enough pathway mappings\n")
       }

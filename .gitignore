@@ -1,9 +1,8 @@
 .Rhistory
 .RData
-*.tiff
-*.pdf
 Result/
 TestResult/
+TestResult_v2/
 
 # Temp/test scripts
 debug_*.r
@@ -14,3 +13,7 @@ run_wf1.r
 *.qs
 *.csv
 !MetaboFlow_v1.r
+
+# Allow example_results (tracked in git)
+!example_results/
+!example_results/**

@@ -228,6 +228,12 @@ ALPHA          <- 0.05                        # FDR 校正 P 值阈值
 CONTROL_GROUP  <- "control"                   # 对照组名（须匹配文件名前缀）
 MODEL_GROUP    <- "DrugA"                     # 实验组名（须匹配文件名前缀）
 DB_DIR         <- "path/to/your/database"     # 内部数据库路径
+
+## 通路图设置
+TOP_N_PATHWAYS <- 0                           # 图中最多显示通路数（0=全部显著）
+PATHWAY_FIG_W  <- 7                           # 通路图宽度（英寸）
+PATHWAY_FIG_H  <- 5                           # 通路图高度（英寸）
+SUBFIG_MODE    <- FALSE                       # 小子图模式（更大字体+紧凑布局）
 ```
 
 ### 参数详解
@@ -248,6 +254,18 @@ DB_DIR         <- "path/to/your/database"     # 内部数据库路径
 | `NOISE_LEVEL` | `500` | 仪器噪声水平 |
 | `MIN_FRACTION` | `0.5` | 色谱峰在样本中最低出现比例 |
 | `NORM_METHOD` | `"median"` | 归一化方法：`"median"` / `"mean"` / `"sum"` / `"pqn"` |
+| `TOP_N_PATHWAYS` | `0` | 通路图中最多显示的通路数量。0=显示全部显著通路 |
+| `PATHWAY_FIG_W` | `7` | 通路富集图宽度（英寸）。论文子图建议 3.5 |
+| `PATHWAY_FIG_H` | `5` | 通路富集图高度（英寸）。论文子图建议 3 |
+| `SUBFIG_MODE` | `FALSE` | 小子图模式。设为 `TRUE` 时自动放大字体以适应论文拼图 |
+
+### 非特异性通路过滤
+
+MetaboFlow 自动过滤以下过于宽泛的通路（几乎在任何数据集中都会显著）：
+- Metabolic pathways、Biosynthesis of secondary metabolites、Carbon metabolism 等
+- 通路内代谢物数 > 150 的超大通路
+
+过滤后结果保存为 `*_filtered.xlsx`，原始全部显著结果保存为 `*.xlsx`。图表默认使用过滤后数据。
 
 ### 常用 KEGG 物种代码
 

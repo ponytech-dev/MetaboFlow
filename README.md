@@ -91,6 +91,8 @@ Download and install R ≥ 4.5.0 from [CRAN](https://cran.r-project.org/). Open 
 - **HMDB ID normalization** — automatically converts old 7-digit to new 11-digit format
 - **Smart P-value selection** — uses FDR-corrected `adj.P.Val` when possible; falls back to raw `P.Value` for small sample sizes (n ≤ 3)
 - **Bilingual comments** — all code comments in both Chinese and English
+- **Non-specific pathway filter** — auto-removes overly broad pathways (e.g., "Metabolic pathways", "ABC transporters"); outputs both full and filtered results
+- **Sub-figure mode** — `SUBFIG_MODE=TRUE` increases font size for small paper panels (3.5×3 in); `TOP_N_PATHWAYS` controls how many pathways to show
 
 ## Quick Start / 快速开始
 
@@ -136,6 +138,7 @@ Result/
 │   ├── kegg_*.xlsx                  # WF3: KEGG enrichment (ORA)
 │   ├── kegg_metabolome_view_*.pdf   # WF3: Enrichment bubble plot
 │   ├── qea_*.xlsx/pdf/tiff          # WF4: Quantitative enrichment (QEA)
+│   ├── *_filtered.xlsx              # Filtered results (non-specific pathways removed)
 │   ├── heatmap_*.pdf/tiff           # Clustered heatmaps
 │   └── summary_*.xlsx              # Parameter summary
 └── Boxplot/                         # Per-metabolite boxplots
@@ -156,6 +159,10 @@ Result/
 | `NORM_METHOD` | "median" | Normalization method ("median", "mean", "sum", "pqn") |
 | `CONTROL_GROUP` | "control" | Control group name (must match filename prefix) |
 | `MODEL_GROUP` | "MethiocarbA" | Model/treatment group name (must match filename prefix) |
+| `TOP_N_PATHWAYS` | 0 | Max pathways in enrichment plots (0 = all significant) |
+| `PATHWAY_FIG_W` | 7 | Pathway figure width (inches) |
+| `PATHWAY_FIG_H` | 5 | Pathway figure height (inches) |
+| `SUBFIG_MODE` | FALSE | Small sub-figure mode: larger text + compact layout for paper panels |
 
 ## Figure Standards / 图表标准
 
@@ -194,6 +201,27 @@ If you use MetaboFlow in your research, please cite:
 - **limma**: Ritchie ME, et al. *limma powers differential expression analyses.* Nucleic Acids Research, 2015.
 - **globaltest**: Goeman JJ, et al. *A global test for groups of genes.* Bioinformatics, 2004.
 - **KEGGREST**: Tenenbaum D, Maintainer B. *KEGGREST: Client-side REST access to KEGG.* Bioconductor.
+
+## Example Results / 示例结果
+
+The `example_results/` directory contains a complete set of analysis outputs from a Methiocarb B zebrafish toxicology experiment:
+
+```
+example_results/
+├── 01_differential_peaks/     # Volcano plots + differential peak CSV
+├── 02_pathway_enrichment/     # Four workflow results
+│   ├── WF1_SMPDB/            # SMPDB enrichment (ORA, tidymass)
+│   ├── WF2_MSEA/             # MSEA enrichment (ORA, MetaboAnalystR)
+│   ├── WF3_KEGG/             # KEGG enrichment (ORA, KEGGREST+Fisher)
+│   │   ├── kegg_*.xlsx       # All pathways
+│   │   └── kegg_*_filtered.xlsx  # Non-specific pathways removed
+│   ├── WF4_QEA/              # Quantitative enrichment (GlobalTest)
+│   └── subfig_examples/      # Small sub-figure versions (3.5×3 in)
+├── 03_heatmap/                # Clustered heatmaps
+├── 04_PCA/                    # PCA scores plots
+├── 05_boxplot/                # Representative metabolite boxplots (10 of 183)
+└── 06_summary/                # Run parameter summary
+```
 
 ## License / 许可证
 
