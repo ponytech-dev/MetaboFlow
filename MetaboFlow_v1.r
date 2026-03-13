@@ -1,11 +1,12 @@
 ##############################################################################
-##  MetaboFlow v1.0 — 非靶向代谢组学三工作流集成分析系统
-##  MetaboFlow v1.0 — Untargeted Metabolomics Tri-Workflow Integrated Pipeline
+##  MetaboFlow v1.0 — 非靶向代谢组学四工作流集成分析系统
+##  MetaboFlow v1.0 — Untargeted Metabolomics Quad-Workflow Integrated Pipeline
 ##
 ##  工作流 / Workflows:
-##    1. tidymass enrich_hmdb  → SMPDB通路富集 / SMPDB Pathway Enrichment
-##    2. MetaboAnalystR MSEA   → 代谢物集富集分析 / Metabolite Set Enrichment
-##    3. MetaboAnalystR PathwayAnalysis → KEGG拓扑通路分析 / KEGG Topology Analysis
+##    1. tidymass enrich_hmdb  → SMPDB通路富集 / SMPDB Pathway Enrichment (ORA)
+##    2. MetaboAnalystR MSEA   → 代谢物集富集分析 / Metabolite Set Enrichment (ORA)
+##    3. MetaboAnalystR PathwayAnalysis → KEGG拓扑通路分析 / KEGG Topology Analysis (ORA)
+##    4. MetaboAnalystR QEA    → 定量富集分析 / Quantitative Enrichment Analysis (QEA)
 ##
 ##  所有输出图表按 Nature 论文级别标准渲染：
 ##  All figures rendered to Nature publication standards:
@@ -597,7 +598,66 @@ for (fi in seq_along(files)) {
   } else {
     cat("  WF3: 跳过/skipped\n")
   }
-  
+
+  ## ==== 工作流4: QEA 定量富集分析 (MetaboAnalystR) ====
+  ## 与ORA不同，QEA直接使用浓度/强度矩阵，不需要预先筛选差异代谢物
+  ## Unlike ORA, QEA uses the full concentration matrix — no pre-screening needed
+  ## 输入：已注释代谢物的浓度矩阵 + 分组标签
+  ## Input: annotated metabolite concentration matrix + group labels
+  if (has_metaboanalyst && nrow(merged) >= 5) {
+    cat("  WF4: QEA...")
+    tryCatch({
+      ## 构建QEA输入矩阵 / Build QEA input matrix
+      ## 格式：第1列=标签(Label)，后续列=代谢物名称，行=样本
+      ## Format: col1=Label, remaining cols=compound names, rows=samples
+      qea_expr_cols <- colnames(merged)[colnames(merged) %in% colnames(object2@expression_data)]
+      qea_mat <- merged[, c("Compound.name", qea_expr_cols)]
+      qea_mat <- distinct(qea_mat, Compound.name, .keep_all = TRUE)
+      rownames(qea_mat) <- qea_mat$Compound.name
+      qea_mat <- qea_mat[, -1, drop = FALSE]
+
+      ## 转置：行=样本, 列=代谢物 / Transpose: rows=samples, cols=metabolites
+      qea_t <- as.data.frame(t(qea_mat))
+      qea_t$Label <- gsub("[0-9]", "", rownames(qea_t))
+      qea_t <- qea_t[, c("Label", setdiff(colnames(qea_t), "Label"))]
+
+      ## 写入临时CSV / Write temp CSV for Read.TextData
+      qea_file <- tempfile(fileext = ".csv")
+      write.csv(qea_t, qea_file, row.names = FALSE)
+
+      mSet3 <- InitDataObjects("conc", "msetqea", FALSE)
+      mSet3 <- Read.TextData(mSet3, qea_file, "rowu", "disc")
+      mSet3 <- SanityCheckData(mSet3)
+      mSet3 <- ReplaceMin(mSet3)
+      mSet3 <- CrossReferencing(mSet3, "name")
+      mSet3 <- CreateMappingResultTable(mSet3)
+      mSet3 <- PreparePrenormData(mSet3)
+      mSet3 <- Normalization(mSet3, "NULL", "LogNorm", "NULL", ratio = FALSE, ratioNum = 20)
+      mSet3 <- SetMetabolomeFilter(mSet3, FALSE)
+      mSet3 <- SetCurrentMsetLib(mSet3, "smpdb_pathway", 2)
+      mSet3 <- CalculateGlobalTestScore(mSet3)
+
+      if (!is.null(mSet3$analSet$qea.mat)) {
+        qea_res <- as.data.frame(mSet3$analSet$qea.mat)
+        qea_res$pathway <- rownames(qea_res)
+        qea_res <- qea_res[order(qea_res[, "Raw p"]), ]
+        write.xlsx(qea_res, paste0("差异代谢物/qea_", prefix, ".xlsx"))
+
+        qea_sig <- qea_res[qea_res[, "Raw p"] < 0.05, ]
+        if (nrow(qea_sig) > 0) {
+          qea_sig$neg_log_p <- -log10(qea_sig[, "Raw p"])
+          plot_pathway_bubble(qea_sig, "Hits", "pathway", "neg_log_p", "Expected",
+                              "QEA Enrichment", paste0("差异代谢物/qea_", prefix))
+        }
+        cat(" 完成/done (", nrow(qea_res), "条通路/pathways)\n")
+      } else {
+        cat(" 无结果/no results\n")
+      }
+    }, error = function(e) cat(" 失败/failed:", conditionMessage(e), "\n"))
+  } else {
+    cat("  WF4: 跳过/skipped\n")
+  }
+
   ## ==== 热图 / Heatmap ====
   cat("  Heatmap...")
   tryCatch({
@@ -702,9 +762,10 @@ cat("##############################################################\n")
 cat("  输出目录 / Output directories:\n")
 cat("    差异代谢峰/   - 差异峰CSV + 火山图(PDF/TIFF)\n")
 cat("    差异代谢物/   - 三工作流通路分析 + 热图\n")
-cat("      smpdb_*     - WF1: SMPDB通路富集\n")
-cat("      msea_*      - WF2: MSEA代谢物集富集\n")
-cat("      kegg_*      - WF3: KEGG拓扑通路分析\n")
+cat("      smpdb_*     - WF1: SMPDB通路富集(ORA)\n")
+cat("      msea_*      - WF2: MSEA代谢物集富集(ORA)\n")
+cat("      kegg_*      - WF3: KEGG拓扑通路分析(ORA)\n")
+cat("      qea_*       - WF4: 定量富集分析(QEA)\n")
 cat("      heatmap_*   - 差异代谢物热图\n")
 cat("      summary_*   - 参数汇总\n")
 cat("    Boxplot/       - 单代谢物箱线图\n")

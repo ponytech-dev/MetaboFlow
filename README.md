@@ -1,28 +1,29 @@
 # MetaboFlow v1.0
 
-**Untargeted Metabolomics Tri-Workflow Integrated Pipeline**
+**Untargeted Metabolomics Quad-Workflow Integrated Pipeline**
 
-**非靶向代谢组学三工作流集成分析系统**
+**非靶向代谢组学四工作流集成分析系统**
 
 ---
 
 ## Overview / 概述
 
-MetaboFlow is an R-based end-to-end pipeline for untargeted LC-MS metabolomics, integrating feature extraction, normalization, differential analysis, metabolite annotation, and **three parallel pathway enrichment workflows** for cross-validation. All figures are rendered to **Nature publication standards**.
+MetaboFlow is an R-based end-to-end pipeline for untargeted LC-MS metabolomics, integrating feature extraction, normalization, differential analysis, metabolite annotation, and **four parallel pathway enrichment workflows** (3× ORA + 1× QEA) for cross-validation. All figures are rendered to **Nature publication standards**.
 
-MetaboFlow 是一套基于R语言的非靶向LC-MS代谢组学全流程分析系统，集成了特征提取、归一化、差异分析、代谢物注释，以及**三个并行通路富集工作流**用于交叉验证。所有图表按**Nature论文投稿标准**渲染。
+MetaboFlow 是一套基于R语言的非靶向LC-MS代谢组学全流程分析系统，集成了特征提取、归一化、差异分析、代谢物注释，以及**四个并行通路富集工作流**（3个ORA + 1个QEA）用于交叉验证。所有图表按**Nature论文投稿标准**渲染。
 
-## Three Workflows / 三个工作流
+## Four Workflows / 四个工作流
 
-| Workflow | Engine | Database | Strength |
-|----------|--------|----------|----------|
-| **WF1**: SMPDB Pathway Enrichment | tidymass `enrich_hmdb` | SMPDB/HMDB | Seamless tidymass integration |
-| **WF2**: MSEA | MetaboAnalystR | SMPDB metabolite sets | Hypergeometric test, updated sets |
-| **WF3**: KEGG Topology Analysis | MetaboAnalystR | KEGG species-specific | **Pathway Impact** topological score |
+| Workflow | Type | Engine | Database | Strength |
+|----------|------|--------|----------|----------|
+| **WF1**: SMPDB Pathway Enrichment | ORA | tidymass `enrich_hmdb` | SMPDB/HMDB | Seamless tidymass integration |
+| **WF2**: MSEA | ORA | MetaboAnalystR | SMPDB metabolite sets | Hypergeometric test, updated sets |
+| **WF3**: KEGG Topology Analysis | ORA | MetaboAnalystR | KEGG species-specific | **Pathway Impact** topological score |
+| **WF4**: QEA Quantitative Enrichment | QEA | MetaboAnalystR | SMPDB pathway | Full concentration matrix, **GlobalTest** |
 
 ## Features / 特色
 
-- **One input, three outputs** — single mzXML input triggers all three pathway analyses
+- **One input, four outputs** — single mzXML input triggers all four pathway analyses
 - **Auto-installation** — all dependencies (CRAN, Bioconductor, tidymass, MetaboAnalystR) auto-detected and installed
 - **Nature-quality figures** — NPG color palette, Arial font, dual PDF vector + TIFF 300 DPI output
 - **HMDB ID normalization** — automatically converts old 7-digit to new 11-digit format
@@ -35,11 +36,14 @@ MetaboFlow 是一套基于R语言的非靶向LC-MS代谢组学全流程分析系
 2. Open `MetaboFlow_v1.r` in RStudio
 3. Modify the **User Parameters** section (line ~130):
    ```r
-   WORK_DIR     <- "path/to/your/data"
-   POLARITY     <- "positive"    # or "negative"
-   ORGANISM     <- "dre"         # dre=zebrafish, hsa=human, mmu=mouse
-   LOGFC_CUTOFF <- 0.176         # 1.5-fold change
-   ALPHA        <- 0.05          # FDR threshold
+   WORK_DIR       <- "path/to/your/data"
+   POLARITY       <- "positive"    # or "negative"
+   ORGANISM       <- "dre"         # dre=zebrafish, hsa=human, mmu=mouse
+   LOGFC_CUTOFF   <- 0.176         # 1.5-fold change
+   ALPHA          <- 0.05          # FDR threshold
+   CONTROL_GROUP  <- "control"     # must match filename prefix
+   MODEL_GROUP    <- "DrugA"       # must match filename prefix
+   DB_DIR         <- "path/to/your/inhouse_database"
    ```
 4. Run the entire script (`Ctrl+Alt+R` in RStudio)
 
@@ -65,10 +69,11 @@ Result/
 │   ├── *差异峰.csv                   # Feature lists (adj.P.Val filtered)
 │   └── *差异代谢峰.pdf/tiff          # Volcano plots
 ├── 差异代谢物/                       # Pathway analysis
-│   ├── smpdb_*.xlsx/pdf/tiff        # WF1: SMPDB enrichment
-│   ├── msea_*.xlsx/pdf/tiff         # WF2: MSEA enrichment
-│   ├── kegg_*.xlsx                  # WF3: KEGG topology
+│   ├── smpdb_*.xlsx/pdf/tiff        # WF1: SMPDB enrichment (ORA)
+│   ├── msea_*.xlsx/pdf/tiff         # WF2: MSEA enrichment (ORA)
+│   ├── kegg_*.xlsx                  # WF3: KEGG topology (ORA)
 │   ├── kegg_metabolome_view_*.pdf   # WF3: Impact scatter plot
+│   ├── qea_*.xlsx/pdf/tiff          # WF4: Quantitative enrichment (QEA)
 │   ├── heatmap_*.pdf/tiff           # Heatmaps
 │   └── summary_*.xlsx              # Parameter summary
 └── Boxplot/                         # Per-metabolite boxplots
@@ -84,6 +89,8 @@ Result/
 | `MS1_PPM` | 15 | MS1 mass tolerance (ppm) |
 | `PEAK_WIDTH` | c(5,30) | Chromatographic peak width range (sec) |
 | `NORM_METHOD` | "median" | Normalization method |
+| `CONTROL_GROUP` | "control" | Control group name (must match filename prefix) |
+| `MODEL_GROUP` | "MethiocarbA" | Model/treatment group name (must match filename prefix) |
 
 ## Figure Standards / 图表标准
 
