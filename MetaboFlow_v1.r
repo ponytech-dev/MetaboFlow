@@ -130,7 +130,7 @@ cat("========== 所有依赖就绪 / All dependencies ready ==========\n\n")
 ## ▼▼▼ 以下参数需要用户根据实验设计修改 ▼▼▼
 ## ▼▼▼ Modify parameters below according to your experiment ▼▼▼
 
-WORK_DIR       <- "C:\\Users\\Zbrar\\Desktop\\transfer"   # 工作路径 / working directory
+WORK_DIR       <- "path/to/your/data"   # 工作路径 / working directory (use forward slashes on all OS)
 POLARITY       <- "positive"     # 极性模式 / ionization polarity: "positive" or "negative"
 LOGFC_CUTOFF   <- 0.176          # log10 FC阈值 / log10 FC threshold (0.176=1.5x, 0.301=2x)
 ALPHA          <- 0.05           # FDR校正显著性阈值 / FDR significance threshold
@@ -143,9 +143,12 @@ MIN_FRACTION   <- 0.5            # 最小样本检出率 / minimum fraction of s
 N_THREADS      <- 10             # 并行线程数 / number of threads
 INTENSITY_FLOOR <- 1000          # 最低强度阈值 / minimum intensity floor
 NORM_METHOD    <- "median"       # 归一化方法 / normalization method ("median","mean","sum","pqn")
+CONTROL_GROUP  <- "control"      # 对照组名称 / control group name (must match filename prefix)
+MODEL_GROUP    <- "MethiocarbA"  # 模型组名称 / model group name (must match filename prefix)
 
 ## 数据库路径（根据本地安装调整）/ Database paths (adjust to local installation)
-DB_DIR <- "C:\\Users\\Zbrar\\Desktop\\inhouse_database"
+## 使用正斜杠或file.path()以兼容所有操作系统 / Use forward slashes or file.path() for cross-platform
+DB_DIR <- "path/to/your/inhouse_database"
 
 ## ▲▲▲ 参数区结束 ▲▲▲
 ## ▲▲▲ End of user parameters ▲▲▲
@@ -210,11 +213,28 @@ save_nature_plot <- function(plot_obj, filename, width = 7, height = 7) {
 }
 
 
-## ========================= 3. 数据处理 / Data Processing ========================= 
+## ========================= 2.5 HMDB ID格式统一 / HMDB ID Normalization =========================
+## 旧版HMDB00132(11位) → 新版HMDB0000132(13位)
+## Old format HMDB00132 (11 chars) → New format HMDB0000132 (13 chars)
+## 在rm()之前定义，确保函数在环境清理时已存在
+## Defined before rm() to ensure the function exists during env cleanup
+normalize_hmdb <- function(ids) {
+  ids <- ids[!is.na(ids) & ids != ""]
+  ids <- ifelse(
+    nchar(ids) == 11 & grepl("^HMDB\\d{5}$", ids),
+    paste0("HMDB00", substring(ids, 5)),
+    ids
+  )
+  unique(ids)
+}
+
+
+## ========================= 3. 数据处理 / Data Processing =========================
 
 rm(list = setdiff(ls(), c("WORK_DIR","POLARITY","LOGFC_CUTOFF","ALPHA","ORGANISM",
                            "MS1_PPM","PEAK_WIDTH","SN_THRESH","NOISE_LEVEL",
                            "MIN_FRACTION","N_THREADS","INTENSITY_FLOOR","NORM_METHOD",
+                           "CONTROL_GROUP","MODEL_GROUP",
                            "DB_DIR","theme_nature","nature_colors","pathway_gradient",
                            "volcano_colors","heatmap_colors","save_nature_plot",
                            "has_metaboanalyst","normalize_hmdb")))
@@ -242,10 +262,11 @@ setwd("./Result")
 
 ## --- 构建mass_dataset对象 / Build mass_dataset object ---
 raw_data <- read.csv("peak_table_for_cleaning.csv", row.names = 1, header = TRUE)
-expression_data <- raw_data[, -1:-2]
-variable_info <- raw_data[, 1:2] %>% mutate(variable_id = rownames(raw_data))
-variable_info <- variable_info[, c(3, 1, 2)]
+## 按列名提取mz和rt，而非按位置索引 / Select by column name, not position index
+variable_info <- raw_data[, c("mz", "rt")] %>% mutate(variable_id = rownames(raw_data))
+variable_info <- variable_info[, c("variable_id", "mz", "rt")]
 rownames(variable_info) <- seq_len(nrow(raw_data))
+expression_data <- raw_data[, !colnames(raw_data) %in% c("mz", "rt")]
 
 sample_info <- data.frame(
   sample_id = colnames(expression_data),
@@ -263,8 +284,13 @@ object <- create_mass_dataset(
 object <- impute_mv(object = object, method = "knn")
 
 ## --- 强度过滤 / Intensity filtering ---
-isOK <- apply(object@expression_data, 1, function(row) !any(row < INTENSITY_FLOOR))
-object@expression_data <- object@expression_data[isOK, ]
+## 使用tidymass API过滤，保持对象内部一致性 / Use tidymass API to maintain object consistency
+keep_ids <- rownames(object@expression_data)[
+  apply(object@expression_data, 1, function(row) !any(row < INTENSITY_FLOOR))
+]
+object <- object %>%
+  activate_mass_dataset("variable_info") %>%
+  dplyr::filter(variable_id %in% keep_ids)
 
 ## --- 归一化 / Normalization ---
 object2 <- normalize_data(object, method = NORM_METHOD)
@@ -331,7 +357,7 @@ run_limma <- function(data_ctl, data_treat, feature_names) {
 plot_volcano_nature <- function(Diff, title_text, filename) {
   Diff$Significance <- ifelse(
     Diff$adj.P.Val < ALPHA & abs(Diff$logFC) > LOGFC_CUTOFF,
-    ifelse(Diff$logFC > LOGFC_CUTOFF, "Up", "Down"), "Not"
+    ifelse(Diff$logFC > 0, "Up", "Down"), "Not"
   )
   Diff$Significance <- factor(Diff$Significance, levels = c("Down", "Not", "Up"))
   
@@ -360,8 +386,8 @@ plot_volcano_nature <- function(Diff, title_text, filename) {
 }
 
 ## --- 执行差异分析 / Execute differential analysis ---
-con <- group == "control"
-model_grp <- group == "MethiocarbA"
+con <- group == CONTROL_GROUP
+model_grp <- group == MODEL_GROUP
 PCA_data <- as.data.frame(object2@expression_data)
 log_PCA_data <- log10(PCA_data)
 
@@ -376,7 +402,7 @@ if (any(con)) {
 }
 
 ## 其他组 vs Model / Other groups vs Model
-other <- group != "control" & group != "MethiocarbA"
+other <- group != CONTROL_GROUP & group != MODEL_GROUP
 if (any(other)) {
   CTL_ref <- log_PCA_data[, model_grp]
   for (grp in unique(group[other])) {
@@ -422,21 +448,7 @@ write.csv(app3, "所有代谢物.csv", row.names = FALSE)
 cat("  注释完成，共", nrow(app3), "条注释记录 / annotation records\n")
 
 
-## ========================= 7. HMDB ID格式统一 / HMDB ID Normalization ========================= 
-## 旧版HMDB00132(11位) → 新版HMDB0000132(13位)
-## Old format HMDB00132 (11 chars) → New format HMDB0000132 (13 chars)
-normalize_hmdb <- function(ids) {
-  ids <- ids[!is.na(ids) & ids != ""]
-  ids <- ifelse(
-    nchar(ids) == 11 & grepl("^HMDB\\d{5}$", ids),
-    paste0("HMDB00", substring(ids, 5)),
-    ids
-  )
-  unique(ids)
-}
-
-
-## ========================= 8. 三工作流集成 / Tri-Workflow Integration ========================= 
+## ========================= 7. 三工作流集成 / Tri-Workflow Integration ========================= 
 cat("\n========== Step 5: 三工作流通路分析 / Tri-Workflow Pathway Analysis ==========\n")
 dir.create("差异代谢物", showWarnings = FALSE)
 
@@ -462,7 +474,7 @@ plot_pathway_bubble <- function(pw_data, x_col, y_col, size_col, color_col,
 }
 
 ## --- 主执行循环 / Main execution loop ---
-files <- grep("csv$", basename(dir("差异代谢峰")), value = TRUE)
+files <- list.files("差异代谢峰", pattern = "\\.csv$", full.names = FALSE)
 
 for (fi in seq_along(files)) {
   diff_data <- read.csv(paste0("差异代谢峰/", files[fi]))
@@ -511,11 +523,8 @@ for (fi in seq_along(files)) {
   if (has_metaboanalyst && length(HMDB_ids) >= 3) {
     cat("  WF2: MSEA...")
     tryCatch({
-      msea_file <- tempfile(fileext = ".csv")
-      write.csv(data.frame(HMDB = HMDB_ids), msea_file, row.names = FALSE)
-      
+      ## ORA工作流只需Setup.MapData，不需要Read.TextData / ORA only needs Setup.MapData
       mSet <- InitDataObjects("conc", "msetora", FALSE)
-      mSet <- Read.TextData(mSet, msea_file, "rowu", "disc")
       mSet <- Setup.MapData(mSet, HMDB_ids)
       mSet <- CrossReferencing(mSet, "hmdb")
       mSet <- CreateMappingResultTable(mSet)
@@ -546,11 +555,8 @@ for (fi in seq_along(files)) {
   if (has_metaboanalyst && length(KEGG_ids) >= 3) {
     cat("  WF3: KEGG Pathway...")
     tryCatch({
-      kegg_file <- tempfile(fileext = ".csv")
-      write.csv(data.frame(KEGG = KEGG_ids), kegg_file, row.names = FALSE)
-      
+      ## ORA工作流只需Setup.MapData / ORA only needs Setup.MapData
       mSet2 <- InitDataObjects("conc", "pathora", FALSE)
-      mSet2 <- Read.TextData(mSet2, kegg_file, "rowu", "disc")
       mSet2 <- Setup.MapData(mSet2, KEGG_ids)
       mSet2 <- CrossReferencing(mSet2, "kegg")
       mSet2 <- CreateMappingResultTable(mSet2)
@@ -662,8 +668,8 @@ for (nm in names(box_list)) {
     plot_df <- data.frame(value = vals, group = grps)
     grp_levels <- unique(grps)
     ## control排第一 / control first
-    if ("control" %in% grp_levels) {
-      grp_levels <- c("control", setdiff(grp_levels, "control"))
+    if (CONTROL_GROUP %in% grp_levels) {
+      grp_levels <- c(CONTROL_GROUP, setdiff(grp_levels, CONTROL_GROUP))
     }
     plot_df$group <- factor(plot_df$group, levels = grp_levels)
     
