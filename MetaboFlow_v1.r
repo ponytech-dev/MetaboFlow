@@ -195,6 +195,7 @@ TOP_N_PATHWAYS  <- 0          # 图中最多显示通路数 / Max pathways in pl
 PATHWAY_FIG_W   <- 7          # 通路图宽度(英寸) / Pathway figure width (inches)
 PATHWAY_FIG_H   <- 5          # 通路图高度(英寸) / Pathway figure height (inches)
 SUBFIG_MODE     <- FALSE      # 小子图模式：更大字体+紧凑布局 / Small sub-figure mode
+FILTER_NONSPECIFIC <- TRUE    # 过滤非特异性通路 / Filter non-specific pathways (TRUE/FALSE)
 
 ## ▲▲▲ 参数区结束 ▲▲▲
 
@@ -277,10 +278,16 @@ NONSPECIFIC_KEYWORDS <- c(
 NONSPECIFIC_SIZE_CUTOFF <- 150
 
 ## 通路过滤函数 / Pathway filter function
-## 输入: 通路结果df + 通路名列 + 通路大小列(可选)
+## 当 FILTER_NONSPECIFIC=TRUE 时过滤非特异性通路，否则原样返回
+## When FILTER_NONSPECIFIC=TRUE, removes non-specific pathways; otherwise returns as-is
 ## Returns: list(all=原始显著, filtered=过滤后)
 filter_nonspecific <- function(df, name_col = "pathway_name", size_col = NULL) {
   if (nrow(df) == 0) return(list(all = df, filtered = df))
+
+  ## 开关检查 / Check toggle
+  if (!exists("FILTER_NONSPECIFIC") || !isTRUE(FILTER_NONSPECIFIC)) {
+    return(list(all = df, filtered = df))
+  }
 
   ## 关键词匹配过滤 / Keyword match filter
   blacklist_hit <- sapply(df[[name_col]], function(pw) {
@@ -312,7 +319,7 @@ rm(list = setdiff(ls(), c("WORK_DIR","POLARITY","LOGFC_CUTOFF","ALPHA","ORGANISM
                            "MS1_PPM","PEAK_WIDTH","SN_THRESH","NOISE_LEVEL",
                            "MIN_FRACTION","N_THREADS","INTENSITY_FLOOR","NORM_METHOD",
                            "CONTROL_GROUP","MODEL_GROUP","DB_DIR",
-                           "TOP_N_PATHWAYS","PATHWAY_FIG_W","PATHWAY_FIG_H","SUBFIG_MODE",
+                           "TOP_N_PATHWAYS","PATHWAY_FIG_W","PATHWAY_FIG_H","SUBFIG_MODE","FILTER_NONSPECIFIC",
                            "NONSPECIFIC_KEYWORDS","NONSPECIFIC_SIZE_CUTOFF",
                            "theme_nature","nature_colors","pathway_gradient",
                            "volcano_colors","heatmap_colors","save_nature_plot",

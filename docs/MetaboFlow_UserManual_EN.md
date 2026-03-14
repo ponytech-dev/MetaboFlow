@@ -259,14 +259,41 @@ DB_DIR         <- "path/to/your/database"     # In-house database directory
 | `PATHWAY_FIG_W` | `7` | Pathway figure width (inches). Use 3.5 for paper sub-figures |
 | `PATHWAY_FIG_H` | `5` | Pathway figure height (inches). Use 3 for paper sub-figures |
 | `SUBFIG_MODE` | `FALSE` | Small sub-figure mode. When `TRUE`, auto-enlarges fonts for paper panels |
+| **`FILTER_NONSPECIFIC`** | **`TRUE`** | **Non-specific pathway filter toggle. Enabled by default; set `FALSE` to disable** |
 
-### Non-Specific Pathway Filter
+---
 
-MetaboFlow automatically filters overly broad pathways that appear significant in virtually any dataset:
-- "Metabolic pathways", "Biosynthesis of secondary metabolites", "Carbon metabolism", etc.
-- Pathways with >150 total metabolites
+### ⚠️ Non-Specific Pathway Auto-Filter (Key Feature)
 
-Filtered results are saved as `*_filtered.xlsx`; unfiltered results are in `*.xlsx`. Plots use filtered data by default.
+> **Design rationale:** In untargeted metabolomics, certain overly broad pathways (e.g., "Metabolic pathways", "ABC transporters") are flagged as significant in **virtually any experimental condition** because they contain a large number of metabolites, making random hits highly likely. These results **lack biological specificity** and can undermine the credibility of pathway analysis when included in publications.
+
+**Default behavior (`FILTER_NONSPECIFIC = TRUE`):**
+
+MetaboFlow automatically removes the following non-specific pathways:
+
+| Filter Type | Rule | Examples |
+|-------------|------|----------|
+| **Keyword blacklist** | Pathway name matches any of these keywords | Metabolic pathways, Biosynthesis of secondary metabolites, Biosynthesis of amino acids, Carbon metabolism, 2-Oxocarboxylic acid metabolism, Biosynthesis of cofactors, ABC transporters, Protein digestion and absorption, Mineral absorption, Aminoacyl-tRNA biosynthesis |
+| **Size-based filter** | Pathway contains >150 total metabolites | Automatically excludes oversized pathways |
+
+**Dual-file output (ensures completeness):**
+
+| File | Content | Use Case |
+|------|---------|----------|
+| `*.xlsx` | **All** significant pathways (unfiltered) | Complete record for supplementary materials |
+| `*_filtered.xlsx` | Filtered, specific pathways only | **For main-text figures** (default plot data source) |
+
+**To disable filtering:**
+
+If your experiment specifically requires retaining broad pathways (e.g., studying global metabolic reprogramming), set:
+
+```r
+FILTER_NONSPECIFIC <- FALSE   # Disable non-specific filtering, keep all significant pathways
+```
+
+> **Measured effect (MethiocarbB dataset):** WF3 KEGG reduced from 52 significant pathways → 46 (6 broad metabolic pathways removed). WF1/WF2/WF4 SMPDB pathways are inherently more specific and required minimal filtering.
+
+---
 
 ### Common KEGG Organism Codes
 

@@ -163,6 +163,7 @@ Result/
 | `PATHWAY_FIG_W` | 7 | Pathway figure width (inches) |
 | `PATHWAY_FIG_H` | 5 | Pathway figure height (inches) |
 | `SUBFIG_MODE` | FALSE | Small sub-figure mode: larger text + compact layout for paper panels |
+| **`FILTER_NONSPECIFIC`** | **TRUE** | **Auto-filter non-specific pathways (e.g., "Metabolic pathways"). Set FALSE to disable** |
 
 ## Figure Standards / 图表标准
 
