@@ -17,3 +17,28 @@ run_wf1.r
 # Allow example_results (tracked in git)
 !example_results/
 !example_results/**
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+.mypy_cache/
+.pytest_cache/
+*.h5
+*.metabodata
+
+# R renv
+renv/
+.Rprofile
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+
+# uv
+.python-version

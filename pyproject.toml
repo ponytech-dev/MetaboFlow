@@ -1,0 +1,44 @@
+[project]
+name = "metaboflow"
+version = "0.1.0"
+description = "Metabolomics engine aggregation platform"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "h5py>=3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pandas-stubs>=2.1",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["packages"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/common/metabodata/tests"]
+pythonpath = ["packages/common"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["packages/common/metabodata"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

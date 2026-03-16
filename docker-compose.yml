@@ -1,0 +1,33 @@
+services:
+
+  xcms-worker:
+    build:
+      context: ./packages/engines/xcms-worker
+      dockerfile: Dockerfile
+    image: metaboflow/xcms-worker:latest
+    container_name: metaboflow-xcms-worker
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "Rscript", "-e", "cat('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  stats-worker:
+    build:
+      context: ./packages/engines/stats-worker
+      dockerfile: Dockerfile
+    image: metaboflow/stats-worker:latest
+    container_name: metaboflow-stats-worker
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "Rscript", "-e", "cat('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

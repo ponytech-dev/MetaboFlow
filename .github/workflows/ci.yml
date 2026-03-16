@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Python checks ────────────────────────────────────────────────────────────
+  python-checks:
+    name: Python checks (3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Type check (mypy)
+        run: uv run mypy packages/common/metabodata/ --ignore-missing-imports
+
+      - name: Tests with coverage
+        run: uv run pytest --cov=. --cov-report=xml --cov-report=term-missing -v
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  # ── R tests (optional) ──────────────────────────────────────────────────────
+  r-tests:
+    name: R tests (testthat)
+    runs-on: ubuntu-latest
+    # Continue even if R tests fail — R workers are optional in dev
+    continue-on-error: true
+
+    strategy:
+      matrix:
+        worker: [xcms-worker, stats-worker]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up R 4.4
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libcurl4-openssl-dev libssl-dev libxml2-dev \
+            libcairo2-dev libharfbuzz-dev libfribidi-dev \
+            libhdf5-dev libnetcdf-dev
+
+      - name: Install R test dependencies
+        run: |
+          Rscript -e "
+            install.packages(
+              c('testthat', 'dplyr', 'tibble', 'stringr', 'rlang'),
+              repos = 'https://cloud.r-project.org'
+            )
+          "
+
+      - name: Run testthat for ${{ matrix.worker }}
+        run: |
+          Rscript -e "
+            pkg_dir <- 'packages/engines/${{ matrix.worker }}'
+            test_dir <- file.path(pkg_dir, 'tests')
+            if (!dir.exists(test_dir)) {
+              message('No tests directory found for ${{ matrix.worker }} — skipping')
+              quit(status = 0)
+            }
+            # Source R files first so tests can find functions
+            r_files <- list.files(file.path(pkg_dir, 'R'), pattern = '\\\\.R$', full.names = TRUE)
+            invisible(lapply(r_files, function(f) {
+              tryCatch(source(f), error = function(e) {
+                message('Could not source ', f, ': ', conditionMessage(e))
+              })
+            }))
+            testthat::test_dir(test_dir)
+          "
