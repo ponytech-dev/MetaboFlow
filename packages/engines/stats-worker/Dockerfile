@@ -16,16 +16,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy R source files
+# Copy R source files and API entrypoints
 COPY R/ ./R/
+COPY plumber.R ./
+COPY entrypoint.R ./
 
 RUN Rscript -e " \
     options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!requireNamespace('BiocManager', quietly = TRUE)) \
         install.packages('BiocManager'); \
     BiocManager::install(version = '3.19', ask = FALSE, update = FALSE); \
+    # Plumber HTTP API server
+    install.packages('plumber'); \
+    # JSON serialization (used by plumber endpoints)
+    install.packages('jsonlite'); \
     # Core stats / viz packages
-    install.packages(c('ggplot2', 'dplyr', 'tidyr')); \
+    install.packages(c('ggplot2', 'dplyr', 'tidyr', 'ggrepel', 'openxlsx', 'pheatmap')); \
     # limma from Bioconductor
     BiocManager::install('limma', ask = FALSE, update = FALSE); \
     # MetaboAnalystR — large package, uncomment when ready for production build
@@ -36,4 +42,6 @@ RUN Rscript -e " \
 # Data volume mount point
 VOLUME ["/data"]
 
-CMD ["Rscript", "-e", "message('stats-worker ready'); Sys.sleep(Inf)"]
+EXPOSE 8002
+
+CMD ["Rscript", "entrypoint.R"]

@@ -1,15 +1,27 @@
 """MetaboFlow FastAPI application."""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import analysis, engines
+from app.api import analysis, convert, engines, projects, reports
 from app.config import settings
+from app.db.base import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ARG001
+    """Initialise database tables on startup (dev convenience)."""
+    init_db()
+    yield
+
 
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="Metabolomics engine aggregation platform API",
+    lifespan=lifespan,
 )
 
 # CORS
@@ -24,6 +36,9 @@ app.add_middleware(
 # Routes
 app.include_router(analysis.router, prefix=settings.api_prefix)
 app.include_router(engines.router, prefix=settings.api_prefix)
+app.include_router(reports.router, prefix=settings.api_prefix)
+app.include_router(projects.router, prefix=settings.api_prefix)
+app.include_router(convert.router, prefix=settings.api_prefix)
 
 
 @app.get("/health")

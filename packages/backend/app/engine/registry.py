@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from app.engine.base import EngineAdapter
-from app.engine.xcms_adapter import XCMSAdapter
+from app.engine.msdial_adapter import MSDIALAdapter
+from app.engine.mzmine_adapter import MZmineAdapter
+from app.engine.pyopenms_adapter import PyOpenMSAdapter
 from app.engine.stats_adapter import StatsAdapter
+from app.engine.xcms_adapter import XCMSAdapter
 
 
 class EngineRegistry:
@@ -17,6 +20,9 @@ class EngineRegistry:
     def _register_defaults(self) -> None:
         self.register(XCMSAdapter())
         self.register(StatsAdapter())
+        self.register(MZmineAdapter())
+        self.register(PyOpenMSAdapter())
+        self.register(MSDIALAdapter())
 
     def register(self, adapter: EngineAdapter) -> None:
         self._engines[adapter.engine_name] = adapter

@@ -46,6 +46,15 @@ jobs:
       - name: Test backend
         run: cd packages/backend && uv run pytest tests/ -v
 
+      - name: Install chart-service dependencies
+        run: cd packages/chart-service && uv sync --all-extras
+
+      - name: Lint chart-service (ruff)
+        run: cd packages/chart-service && uv run ruff check .
+
+      - name: Test chart-service
+        run: cd packages/chart-service && uv run pytest tests/ -v
+
       - name: Upload coverage report
         uses: codecov/codecov-action@v4
         if: always()

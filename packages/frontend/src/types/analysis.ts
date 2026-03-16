@@ -94,4 +94,56 @@ export interface PathwayResult {
   coverage: number;
   hit_count: number;
   total_count: number;
+  fold_enrichment: number;
+  hit_compounds: string[];
+}
+
+// ---- Result display types ----
+
+export interface VolcanoPoint {
+  feature_id: string;
+  compound_name: string | null;
+  log2fc: number;
+  neg_log10_pval: number;
+  p_value: number;
+  adjusted_p_value: number;
+  significant: 'up' | 'down' | 'ns';
+}
+
+export interface VolcanoData {
+  points: VolcanoPoint[];
+  fc_cutoff: number;
+  pval_cutoff: number;
+}
+
+export interface PCAPoint {
+  sample_id: string;
+  group: string;
+  pc1: number;
+  pc2: number;
+}
+
+export interface PCAData {
+  points: PCAPoint[];
+  variance_explained: [number, number]; // PC1%, PC2%
+}
+
+export interface AnalysisSummary {
+  id: string;
+  name: string | null;
+  status: AnalysisStatusState;
+  engine: string | null;
+  n_samples: number;
+  n_features: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Pipeline step for progress tracking
+export interface PipelineStep {
+  name: string;
+  label: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  duration_ms: number | null;
+  message: string | null;
 }

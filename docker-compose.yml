@@ -49,6 +49,7 @@ services:
       METABOFLOW_CELERY_RESULT_BACKEND: redis://redis:6379/1
       METABOFLOW_XCMS_WORKER_URL: http://xcms-worker:8001
       METABOFLOW_STATS_WORKER_URL: http://stats-worker:8002
+      METABOFLOW_CHART_SERVICE_URL: http://chart-service:8005
       METABOFLOW_CORS_ORIGINS: '["http://localhost:3000"]'
     volumes:
       - ./data:/data
@@ -116,6 +117,42 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # ── Chart Service ────────────────────────────────────────────────────────
+
+  chart-service:
+    build:
+      context: ./packages/chart-service
+      dockerfile: Dockerfile
+    image: metaboflow/chart-service:0.1.0
+    container_name: metaboflow-chart-service
+    restart: unless-stopped
+    environment:
+      CHART_OUTPUT_DIR: /data/charts
+      CHART_DPI: "300"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Frontend ─────────────────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./packages/frontend
+      dockerfile: Dockerfile
+    container_name: metaboflow-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   pgdata:

@@ -33,8 +33,9 @@ async def upload_files(analysis_id: str, files: list[UploadFile]) -> dict:
     if progress is None:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
-    data = analysis_service._analyses[analysis_id]
-    upload_dir = data["upload_dir"]
+    upload_dir = analysis_service.get_upload_dir(analysis_id)
+    if upload_dir is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
 
     saved_files = []
     for f in files:

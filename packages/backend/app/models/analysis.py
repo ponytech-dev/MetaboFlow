@@ -135,6 +135,30 @@ class AnalysisProgress(BaseModel):
     completed_at: datetime | None = None
 
 
+class FeatureResult(BaseModel):
+    """Per-feature differential analysis result."""
+
+    feature_id: str
+    mz: float
+    rt: float
+    compound_name: str | None = None
+    log2fc: float
+    pvalue: float
+    padj: float
+    significant: bool
+
+
+class PathwayResult(BaseModel):
+    """Per-pathway enrichment result."""
+
+    pathway_id: str
+    pathway_name: str
+    p_value: float
+    padj: float
+    n_hits: int
+    n_pathway: int
+
+
 class AnalysisResult(BaseModel):
     analysis_id: str
     status: AnalysisStatus
@@ -142,5 +166,7 @@ class AnalysisResult(BaseModel):
     n_significant: int = 0
     n_annotated: int = 0
     n_pathways: int = 0
+    features: list[FeatureResult] = Field(default_factory=list)
+    pathways: list[PathwayResult] = Field(default_factory=list)
     result_files: list[str] = Field(default_factory=list)
     metabodata_path: str | None = None

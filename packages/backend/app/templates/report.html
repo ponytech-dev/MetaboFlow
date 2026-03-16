@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MetaboFlow Analysis Report — {{ analysis_id }}</title>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Georgia", "Times New Roman", serif;
+      font-size: 14px;
+      line-height: 1.65;
+      color: #1a1a1a;
+      background: #ffffff;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 48px 64px;
+    }
+
+    /* ── Typography ── */
+    h1 { font-size: 22px; font-weight: bold; letter-spacing: 0.02em; color: #0d1b2a; }
+    h2 { font-size: 15px; font-weight: bold; text-transform: uppercase;
+         letter-spacing: 0.08em; color: #0d1b2a; margin-top: 32px; margin-bottom: 10px;
+         padding-bottom: 4px; border-bottom: 1px solid #c8d0d9; }
+    h3 { font-size: 13px; font-weight: bold; color: #2c3e50; margin-top: 16px; margin-bottom: 6px; }
+    p  { margin-bottom: 10px; }
+
+    /* ── Header ── */
+    .report-header {
+      border-bottom: 2px solid #0d1b2a;
+      padding-bottom: 18px;
+      margin-bottom: 28px;
+    }
+    .report-header .meta {
+      display: flex;
+      gap: 32px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #555;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+    }
+    .report-header .meta span { display: flex; flex-direction: column; }
+    .report-header .meta .label { font-weight: 600; color: #0d1b2a; font-size: 11px;
+                                   text-transform: uppercase; letter-spacing: 0.06em; }
+
+    /* ── Status badge ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-completed  { background: #d4edda; color: #155724; }
+    .badge-running    { background: #fff3cd; color: #856404; }
+    .badge-pending    { background: #e2e8f0; color: #4a5568; }
+    .badge-failed     { background: #f8d7da; color: #721c24; }
+
+    /* ── Tables ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      margin-bottom: 16px;
+    }
+    th {
+      background: #0d1b2a;
+      color: #ffffff;
+      text-align: left;
+      padding: 7px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-weight: 600;
+    }
+    td { padding: 6px 12px; vertical-align: top; border-bottom: 1px solid #e8ecf0; }
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) td { background: #f7f9fb; }
+
+    .params-table th, .params-table td { padding: 5px 12px; }
+    .params-table td:first-child { font-weight: 600; color: #2c3e50; width: 40%; }
+
+    /* ── Result summary list ── */
+    ul.results-summary {
+      list-style: none;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    ul.results-summary li {
+      background: #f0f4f8;
+      border-left: 3px solid #0d1b2a;
+      padding: 8px 14px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 13px;
+    }
+
+    /* ── Sample group pills ── */
+    .group-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .group-pill {
+      background: #e8edf2;
+      border-radius: 3px;
+      padding: 2px 10px;
+      font-size: 12px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      color: #2c3e50;
+    }
+
+    /* ── Chart placeholder ── */
+    .chart-placeholder {
+      border: 1px dashed #b0bec5;
+      background: #f9fbfc;
+      border-radius: 4px;
+      text-align: center;
+      padding: 36px 16px;
+      color: #90a4ae;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 12px;
+      margin-bottom: 16px;
+    }
+
+    /* ── Provenance timeline ── */
+    .provenance-step {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid #e8ecf0;
+    }
+    .provenance-step:last-child { border-bottom: none; }
+    .provenance-step .step-meta {
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 12px;
+      color: #555;
+    }
+    .provenance-step .step-meta strong { color: #0d1b2a; display: block; font-size: 13px; margin-bottom: 3px; }
+    .provenance-step .step-meta .engine-tag {
+      display: inline-block;
+      background: #0d1b2a;
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .provenance-step .step-params {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 11.5px;
+      background: #f7f9fb;
+      border: 1px solid #e2e8f0;
+      border-radius: 3px;
+      padding: 8px 10px;
+      color: #2c3e50;
+      line-height: 1.5;
+    }
+
+    /* ── Methods section ── */
+    .methods-text {
+      background: #f7f9fb;
+      border-left: 3px solid #0d1b2a;
+      padding: 14px 18px;
+      font-size: 13px;
+      line-height: 1.8;
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+
+    /* ── Muted / empty state ── */
+    .muted { color: #777; font-style: italic; }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 48px;
+      padding-top: 14px;
+      border-top: 1px solid #c8d0d9;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 11px;
+      color: #888;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────── -->
+<header class="report-header">
+  <h1>MetaboFlow Analysis Report</h1>
+  <div class="meta">
+    <span>
+      <span class="label">Analysis ID</span>
+      {{ analysis_id }}
+    </span>
+    <span>
+      <span class="label">Generated</span>
+      {{ generated_at }}
+    </span>
+    <span>
+      <span class="label">Status</span>
+      <span class="badge badge-{{ status }}">{{ status }}</span>
+    </span>
+    <span>
+      <span class="label">Engine</span>
+      {{ engine | upper }}
+    </span>
+  </div>
+</header>
+
+<!-- ── Section 1: Analysis Configuration ──────────────── -->
+<section>
+  <h2>1. Analysis Configuration</h2>
+  <h3>Peak Detection Engine</h3>
+  <p><strong>{{ engine | upper }}</strong></p>
+
+  <h3>Parameters</h3>
+  {{ params_table | safe }}
+</section>
+
+<!-- ── Section 2: Sample Summary ──────────────────────── -->
+<section>
+  <h2>2. Sample Summary</h2>
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Total samples</td><td>{{ n_samples }}</td></tr>
+      <tr><td>Biological groups</td><td>{{ n_groups }}</td></tr>
+      <tr><td>QC samples</td><td>{{ n_qc }}</td></tr>
+      <tr><td>Batches</td><td>{{ batches | join(", ") }}</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Groups</h3>
+  <div class="group-list">
+    {% for g in groups %}
+      <span class="group-pill">{{ g }}</span>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- ── Section 3: Results Overview ────────────────────── -->
+<section>
+  <h2>3. Results Overview</h2>
+
+  {{ results_summary | safe }}
+
+  {% if include_charts %}
+  <h3>Peak Detection — Feature Count</h3>
+  <div class="chart-placeholder">
+    [Chromatogram / feature count bar chart — rendered at runtime]<br/>
+    {{ n_features }} features detected
+  </div>
+
+  <h3>QC Metrics — RSD Distribution</h3>
+  <div class="chart-placeholder">
+    [RSD distribution histogram — rendered at runtime]<br/>
+    Batch correction: {{ engine }}
+  </div>
+
+  <h3>Differential Analysis — Volcano Plot</h3>
+  <div class="chart-placeholder">
+    [Volcano plot — rendered at runtime]<br/>
+    {{ n_significant }} significant features (DA)
+  </div>
+
+  <h3>Pathway Enrichment</h3>
+  {% if n_pathways > 0 %}
+  <div class="chart-placeholder">
+    [Pathway bubble chart — rendered at runtime]<br/>
+    {{ n_pathways }} enriched pathways
+  </div>
+  {% else %}
+  <p class="muted">No pathway enrichment results available.</p>
+  {% endif %}
+  {% endif %}
+</section>
+
+<!-- ── Section 4: Methods ─────────────────────────────── -->
+<section>
+  <h2>4. Methods</h2>
+  {% if methods_paragraph %}
+  <div class="methods-text">{{ methods_paragraph }}</div>
+  {% else %}
+  <p class="muted">Methods paragraph not yet available (analysis is {{ status }}).</p>
+  {% endif %}
+</section>
+
+<!-- ── Section 5: Provenance Chain ────────────────────── -->
+<section>
+  <h2>5. Provenance Chain</h2>
+  {% if provenance.steps %}
+  {% for step in provenance.steps %}
+  <div class="provenance-step">
+    <div class="step-meta">
+      <strong>{{ step.step | replace("_", " ") | title }}</strong>
+      <span class="engine-tag">{{ step.engine }}</span>
+      {% if step.engine_version %}
+        <br/><span style="font-size:11px;">v{{ step.engine_version }}</span>
+      {% endif %}
+      {% if step.timestamp %}
+        <br/><span style="color:#aaa; font-size:11px;">{{ step.timestamp[:19] | replace("T", " ") }}</span>
+      {% endif %}
+    </div>
+    <div class="step-params">
+      {% for k, v in step.params.items() %}
+        <span style="color:#888;">{{ k }}:</span> {{ v }}<br/>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="muted">No provenance steps recorded.</p>
+  {% endif %}
+</section>
+
+<!-- ── Footer ─────────────────────────────────────────── -->
+<footer>
+  Generated by MetaboFlow v0.1.0 — <a href="https://github.com/metaboflow" style="color:#888;">github.com/metaboflow</a>
+</footer>
+
+</body>
+</html>

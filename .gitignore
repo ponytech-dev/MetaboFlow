@@ -40,5 +40,13 @@ renv/
 .vscode/
 .idea/
 
+# SQLite dev databases
+*.db
+
+# Node.js
+node_modules/
+.next/
+
 # uv
 .python-version
+uv.lock

@@ -1,4 +1,11 @@
-import type { AnalysisConfig, AnalysisStatus, AnalysisResult } from '@/types/analysis';
+import type {
+  AnalysisConfig,
+  AnalysisStatus,
+  AnalysisResult,
+  AnalysisSummary,
+  VolcanoData,
+  PCAData,
+} from '@/types/analysis';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -96,6 +103,58 @@ export function subscribeToProgress(
     es.onerror = onError;
   }
   return es;
+}
+
+/**
+ * Fetch a single analysis (status + metadata).
+ */
+export async function getAnalysis(id: string): Promise<AnalysisStatus> {
+  return fetchJSON<AnalysisStatus>(`/api/v1/analyses/${id}`);
+}
+
+/**
+ * Fetch full analysis results (features, pathways, etc.).
+ */
+export async function getAnalysisResult(id: string): Promise<AnalysisResult> {
+  return fetchJSON<AnalysisResult>(`/api/v1/analyses/${id}/results`);
+}
+
+/**
+ * Fetch the HTML report URL (returns a URL string).
+ */
+export async function getAnalysisReport(id: string): Promise<{ url: string }> {
+  return fetchJSON<{ url: string }>(`/api/v1/analyses/${id}/report`);
+}
+
+/**
+ * Fetch volcano plot data.
+ */
+export async function getVolcanoData(id: string): Promise<VolcanoData> {
+  return fetchJSON<VolcanoData>(`/api/v1/analyses/${id}/results/volcano`);
+}
+
+/**
+ * Fetch PCA plot data.
+ */
+export async function getPCAData(id: string): Promise<PCAData> {
+  return fetchJSON<PCAData>(`/api/v1/analyses/${id}/results/pca`);
+}
+
+/**
+ * List all analyses.
+ */
+export async function listAnalyses(): Promise<AnalysisSummary[]> {
+  return fetchJSON<AnalysisSummary[]>('/api/v1/analyses');
+}
+
+/**
+ * Subscribe to real-time pipeline progress via SSE.
+ * Returns an EventSource; caller must close it.
+ */
+export function streamProgress(id: string): EventSource {
+  return new EventSource(
+    `${API_BASE_URL}/api/v1/analyses/${id}/progress/stream`
+  );
 }
 
 export { ApiError };

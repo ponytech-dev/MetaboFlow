@@ -28,7 +28,7 @@ export function Header() {
           >
             New Analysis
           </Link>
-          <Link href="#" className="transition-colors hover:text-foreground">
+          <Link href="/analyses" className="transition-colors hover:text-foreground">
             History
           </Link>
           <Link href="#" className="transition-colors hover:text-foreground">

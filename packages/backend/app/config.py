@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # Engine worker URLs
     xcms_worker_url: str = "http://localhost:8001"
     stats_worker_url: str = "http://localhost:8002"
+    mzmine_worker_url: str = "http://localhost:8003"
+    msdial_worker_url: str = "http://localhost:8004"
 
     model_config = {"env_prefix": "METABOFLOW_"}
 

@@ -11,8 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy R source files
+# Copy R source files and API entrypoints
 COPY R/ ./R/
+COPY plumber.R ./
+COPY entrypoint.R ./
 
 # Install renv for lock-file based reproducibility
 RUN Rscript -e "install.packages('renv', repos = 'https://cloud.r-project.org')"
@@ -31,6 +33,10 @@ RUN if [ -f renv.lock ]; then \
             if (!requireNamespace('BiocManager', quietly = TRUE)) \
                 install.packages('BiocManager'); \
             BiocManager::install(version = '3.19', ask = FALSE, update = FALSE); \
+            # Plumber HTTP API server
+            install.packages('plumber'); \
+            # JSON serialization (used by plumber endpoints)
+            install.packages('jsonlite'); \
             # Core tidymass ecosystem
             # NOTE: these packages are large; uncomment as needed or use renv.lock
             # install.packages('remotes');
@@ -44,5 +50,6 @@ RUN if [ -f renv.lock ]; then \
 # Data volume mount point
 VOLUME ["/data"]
 
-# Keep container alive — actual work is dispatched by the backend via Rscript calls
-CMD ["Rscript", "-e", "message('xcms-worker ready'); Sys.sleep(Inf)"]
+EXPOSE 8001
+
+CMD ["Rscript", "entrypoint.R"]
