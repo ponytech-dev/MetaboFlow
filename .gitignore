@@ -50,3 +50,9 @@ node_modules/
 # uv
 .python-version
 uv.lock
+
+# E2E test data and results (large binary files)
+tests/e2e/data/faahKO_raw/
+tests/e2e/results/
+*.CDF
+*.cdf

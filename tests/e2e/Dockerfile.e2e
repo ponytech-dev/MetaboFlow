@@ -1,0 +1,47 @@
+FROM rocker/r-ver:4.4.2
+
+# System dependencies for xcms (HDF5, NetCDF), Cairo graphics
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libhdf5-dev \
+    libnetcdf-dev \
+    libxml2-dev \
+    libcurl4-openssl-dev \
+    libssl-dev \
+    libcairo2-dev \
+    libharfbuzz-dev \
+    libfribidi-dev \
+    libfreetype6-dev \
+    libpng-dev \
+    libtiff5-dev \
+    libjpeg-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install R packages: xcms (peak detection), limma (differential), ggplot2 (viz)
+RUN Rscript -e " \
+    options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    if (!requireNamespace('BiocManager', quietly = TRUE)) \
+        install.packages('BiocManager'); \
+    BiocManager::install(version = '3.20', ask = FALSE, update = FALSE); \
+    # Core Bioconductor packages
+    BiocManager::install(c('xcms', 'limma', 'MSnbase'), ask = FALSE, update = FALSE); \
+    # Visualization + data wrangling
+    install.packages(c( \
+        'ggplot2', 'dplyr', 'tidyr', 'ggrepel', 'pheatmap', \
+        'jsonlite', 'tibble', 'purrr', 'stringr' \
+    )); \
+"
+
+WORKDIR /app
+
+# Copy stats-worker R modules (config.R, differential.R, visualization.R)
+COPY packages/engines/stats-worker/R/config.R /app/R/config.R
+COPY packages/engines/stats-worker/R/differential.R /app/R/differential.R
+COPY packages/engines/stats-worker/R/visualization.R /app/R/visualization.R
+
+# Copy E2E test script
+COPY tests/e2e/run_e2e_pipeline.R /app/run_e2e_pipeline.R
+
+# Data and results mount points
+VOLUME ["/data", "/results"]
+
+CMD ["Rscript", "/app/run_e2e_pipeline.R"]
