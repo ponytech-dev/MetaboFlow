@@ -1,10 +1,95 @@
 services:
 
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: metaboflow-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: metaboflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: metaboflow
+      POSTGRES_USER: metaboflow
+      POSTGRES_PASSWORD: metaboflow_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metaboflow"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ── Backend ────────────────────────────────────────────────────────────────
+
+  backend:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile
+    container_name: metaboflow-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      METABOFLOW_DATABASE_URL: postgresql://metaboflow:metaboflow_dev@postgres:5432/metaboflow
+      METABOFLOW_REDIS_URL: redis://redis:6379/0
+      METABOFLOW_CELERY_BROKER_URL: redis://redis:6379/0
+      METABOFLOW_CELERY_RESULT_BACKEND: redis://redis:6379/1
+      METABOFLOW_XCMS_WORKER_URL: http://xcms-worker:8001
+      METABOFLOW_STATS_WORKER_URL: http://stats-worker:8002
+      METABOFLOW_CORS_ORIGINS: '["http://localhost:3000"]'
+    volumes:
+      - ./data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  celery-worker:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile
+    container_name: metaboflow-celery
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+    restart: unless-stopped
+    environment:
+      METABOFLOW_DATABASE_URL: postgresql://metaboflow:metaboflow_dev@postgres:5432/metaboflow
+      METABOFLOW_REDIS_URL: redis://redis:6379/0
+      METABOFLOW_CELERY_BROKER_URL: redis://redis:6379/0
+      METABOFLOW_CELERY_RESULT_BACKEND: redis://redis:6379/1
+      METABOFLOW_XCMS_WORKER_URL: http://xcms-worker:8001
+      METABOFLOW_STATS_WORKER_URL: http://stats-worker:8002
+    volumes:
+      - ./data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Engine Workers ─────────────────────────────────────────────────────────
+
   xcms-worker:
     build:
       context: ./packages/engines/xcms-worker
       dockerfile: Dockerfile
-    image: metaboflow/xcms-worker:latest
+    image: metaboflow/xcms-worker:0.1.0
     container_name: metaboflow-xcms-worker
     restart: unless-stopped
     volumes:
@@ -20,7 +105,7 @@ services:
     build:
       context: ./packages/engines/stats-worker
       dockerfile: Dockerfile
-    image: metaboflow/stats-worker:latest
+    image: metaboflow/stats-worker:0.1.0
     container_name: metaboflow-stats-worker
     restart: unless-stopped
     volumes:
@@ -31,3 +116,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+volumes:
+  pgdata:
