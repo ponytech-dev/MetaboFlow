@@ -109,6 +109,19 @@ MetaboFlow 是代谢组学领域的**引擎聚合平台**：
 | **Galaxy W4M** | 无需编程的云端工作流 | MetaboFlow 专注代谢组学，UI 现代化，图表出版质量，中文社区支持 |
 | **tidyMass** | 面向对象可重复性框架 | MetaboFlow 有 GUI，不要求 R 编程，面向实验室而非生信开发者 |
 
+**新增竞品对比：SLAW（2024 Anal. Chem.）**
+
+| 维度 | SLAW | MetaboFlow |
+|------|------|-----------|
+| 引擎选择 | 3 个峰检测引擎（CentWave/ADAP/FFM） | 8+ 引擎覆盖 9 个环节 |
+| 可选环节 | 仅①峰检测 | ①峰检测 + ⑤-⑨全部可选 |
+| 多引擎并行对比 | 不支持 | 核心功能 |
+| 注释/通路集成 | 无 | GNPS/SIRIUS/HMDB + 4种通路策略 |
+| 零代码界面 | 无（命令行） | Web UI + 桌面应用 |
+| Docker 部署 | 无 | docker compose 一键启动 |
+
+**定位差异**：SLAW 是"帮你选最好的峰检测引擎"（单引擎优化器），MetaboFlow 是"同时跑多个引擎，对比结果，逐环节混搭"（多引擎聚合对比平台）。
+
 ---
 
 ## 2. 产品架构设计
@@ -240,6 +253,44 @@ class MetaboData:
                            #   - "batch_corrected": 批次效应校正后
 ```
 
+**MetaboData 扩展：逐环节中间产物存储**
+
+为支持逐环节混搭架构，MetaboData 的 `layers` 和 `uns` 需要存储每步的中间产物：
+
+```python
+# layers 字段扩展
+layers = {
+    "raw": np.ndarray,                  # 原始峰面积
+    "normalized": np.ndarray,            # 归一化后
+    "log2": np.ndarray,                  # log2 变换后
+    "imputed": np.ndarray,               # 缺失值填充后
+    "batch_corrected": np.ndarray,       # 批次效应校正后
+}
+
+# uns 字段新增：逐环节中间产物
+uns["step_outputs"] = {
+    "peak_detection": {                  # ①峰检测输出
+        "peak_list": [...],              # 每个样本的峰列表 (m/z, RT, intensity, boundaries)
+        "engine": "xcms",
+        "algorithm": "CentWave",
+    },
+    "alignment": {                       # ②RT对齐输出
+        "rt_correction_map": {...},      # RT 校正映射
+        "engine": "xcms",
+        "algorithm": "Obiwarp",
+    },
+    "correspondence": {                  # ③特征对应输出
+        "feature_groups": [...],         # 特征分组结果
+    },
+    "gap_filling": {                     # ④缺失值填充
+        "method": "kNN",
+        "fill_rate": 0.95,
+    },
+}
+```
+
+**设计理由**：存储每步中间产物使得用户可以在任意环节边界切换方法——例如用 xcms CentWave 做峰检测，然后用 MZmine RANSAC 做 RT 对齐（Phase 3 功能）。
+
 **与现有标准的关系：**
 - 可导出为 **mzTab-M 2.0** 格式（HUPO-PSI 标准，MZmine4 和 MS-DIAL 5 支持）
 - 可导入 MetaboLights 提交所需的 **ISA-Tab** 格式
@@ -310,6 +361,18 @@ class EngineAdapter(ABC):
 | **Skyline（Small Mol）** | C# | 闭源 | 4 | P2 | CLI（SkylineBatch） | 靶向定量金标准，MRM/SRM 场景 |
 | **El-MAVEN** | C++ | ~350 | 3 | P3 | CLI | GUI 为主，CI 集成难度高 |
 
+**峰检测算法流派分类（基于引擎对比调研）**
+
+| 流派 | 思路 | 代表算法 | 引擎 |
+|:---:|------|---------|------|
+| A | 先切 m/z 维度成 1D 色谱图，再在 RT 维找峰 | CentWave, MatchedFilter, ADAP, SG, LW-MA | xcms, MZmine, El-MAVEN, MS-DIAL |
+| B | 直接在 RT×m/z 2D 平面做空间搜索 | GridMass, Peak Spotting | MZmine |
+| C | 先合并所有样本成全局图，一次检测 | Composite Map | asari |
+| D | 先聚类 3D 信号团，再切边界 | Signal Clustering | MassCube |
+| E | 建质量轨迹 + 模型拟合验证 | FeatureFinderMetabo | OpenMS |
+
+**关键发现**：算法流派差异 (10-100x 速度差) >> 编程语言差异 (2-5x)。asari (Python) 比 xcms (R/C++) 快 10-100x，是因为 Composite Map 架构本身更高效，不是语言优势。
+
 ### 3.3 批次效应校正引擎
 
 | 引擎 | 语言 | GitHub Stars | CLI/API 封装性 | 集成优先级 | 集成方式 |
@@ -356,6 +419,20 @@ class EngineAdapter(ABC):
 | **pathview** | R | Bioc 高 | 4 | P1 | R Plumber API（KEGG 通路可视化） |
 | **KEGGREST** | R | Bioc 高 | 3 | P1 | R Plumber API（本地缓存规避速率限制） |
 
+**通路分析的两条技术路线**
+
+```
+传统路线:  峰检测 → 注释(获取 HMDB ID) → ORA/MSEA/QEA → 通路结果
+              ↓
+           瓶颈：>50% 特征无法注释 → 通路分析只用了不到一半的数据
+
+Mummichog路线:  峰检测 → 直接用 m/z + p-value → 通路预测
+              ↓
+           优势：100% 特征参与，不受注释瓶颈限制
+```
+
+MetaboFlow 应同时提供两条路线并对比结果——这本身就是有价值的方法学比较。
+
 ### 3.7 图表引擎
 
 | 引擎 | 语言 | Stars | 集成优先级 | 出版质量 |
@@ -393,6 +470,24 @@ class EngineAdapter(ABC):
 **层次 3（Phase 4+ 实现）：数据积累与元分析**
 - 收集平台上多引擎处理同一数据集的历史记录
 - 训练参数推荐模型
+
+### 3.10 9 环节解耦性分析
+
+完整的非靶向代谢组学管线包含 9 个环节，各环节与峰检测引擎的依赖度不同：
+
+| 环节 | 引擎依赖度 | 可混搭程度 | 实现难度 | Phase |
+|------|:---:|:---:|:---:|:---:|
+| ① 峰检测 | 强 | 引擎级选择 | 中 | Phase 1 |
+| ② RT 对齐 | 中 | 需中间格式 | 高 | Phase 3 |
+| ③ 特征对应 | 中 | 需中间格式 | 高 | Phase 3 |
+| ④ 缺失值填充 | 弱 | 统计方法可自由选 | 低 | Phase 1 |
+| ⑤ 归一化 | **无** | **完全自由** | **低** | Phase 1 |
+| ⑥ 注释/鉴定 | **无** | **完全自由** | 低 | Phase 1 |
+| ⑦ 统计分析 | **无** | **完全自由** | **低** | Phase 1 |
+| ⑧ 通路/富集 | **无** | **完全自由** | **低** | Phase 1 |
+| ⑨ 报告生成 | **无** | **完全自由** | 低 | Phase 1 |
+
+**战略意义**：⑤-⑨ 占管线的 5/9，全部可以在 Phase 1 就实现自由混搭，且技术难度低。这是 MetaboFlow 最容易做出差异化的区域，也是 SLAW 完全没有覆盖的空白。
 
 ---
 
@@ -448,13 +543,13 @@ class EngineAdapter(ABC):
 
 **子步骤（在单引擎内部）**
 
-| 步骤 | 算法选项 | 默认推荐 |
-|------|---------|---------|
-| 峰检测 | centWave（XCMS）、ADAP（MZmine）、FeatureFinderMetabo（OpenMS） | centWave |
-| RT 对齐 | OBI-Warp（XCMS）、JoinAligner（MZmine） | OBI-Warp |
-| 特征对应 | density grouping（XCMS）、peak list combiner（MZmine） | 随引擎选择 |
-| 归一化 | TIC、PQN（概率商）、内标、中位数 | PQN |
-| 缺失值填充 | kNN（MAR）、最小值/2（MNAR）、随机森林 | kNN |
+| 步骤 | 算法选项 | 默认推荐 | 可选引擎 |
+|------|---------|---------|---------|
+| 峰检测 | CentWave / MatchedFilter / ADAP / GridMass / Composite Map / Signal Clustering / FFM | CentWave | xcms / MZmine / asari / MassCube / OpenMS |
+| RT 对齐 | Obiwarp(DTW) / PeakGroups+LOESS / RANSAC+LOESS / Join Aligner / 一体化(asari) | Obiwarp | xcms / MZmine / asari(内置) |
+| 特征对应 | PeakDensity / NearestPeaks / Join Aligner / MassGrid / QT Clustering | PeakDensity | xcms / MZmine / asari / OpenMS |
+| 缺失值填充 | re-extraction / kNN / min/2 / Random Forest / QRILC / 复合图反投射(asari) | kNN | 引擎内置 + 独立统计方法 |
+| 归一化 | TIC / PQN / QC-RLSC / ComBat / SERRF / Median | PQN | 独立于引擎 |
 
 **依赖引擎**
 
@@ -1038,6 +1133,20 @@ MetaboAnalyst 6.0 已发布剂量-响应模块：
 1. **主贡献（方法学）**：首次建立跨引擎标准化 benchmark 体系。XCMS/MZmine/pyOpenMS 处理同一数据集特征仅 8% 重叠（Analytica Chimica Acta 2024），目前无任何平台让用户系统性认知这一差异并做出有依据的选择。
 2. **次贡献（工程）**：统一零代码接口，非生信用户可在同等条件下运行和比较多个引擎。
 3. **三次贡献（可重复性）**：完整的参数快照 + 版本锁定 + MetaboData 格式，解决代谢组学可重复性危机。
+
+**新增第四层贡献（逐环节混搭）**
+
+4. **四次贡献（工作流组合创新）**：首次系统性证明"逐环节混搭组合可优于任何单引擎"——这需要 benchmark 数据支撑，但如果成立，可以将论文从"工具描述"提升为"方法学发现"级别。
+
+**发表期刊层级更新（基于引擎对比调研）**
+
+| 路线 | 条件 | 期刊上限 | 期刊下限 |
+|------|------|:---:|:---:|
+| A: 纯工具 | 多引擎聚合 + 零代码 + Docker | NAR Web Server (~14) | Bioinformatics (~5) |
+| B: Benchmark + 工具 | 证明"混搭 > 单引擎" | **Nat. Commun. (~17)** | Anal. Chem. (~7) |
+| C: 工具 + 生物发现 | 多引擎发现单引擎遗漏的生物标志物 | 取决于发现 | — |
+
+**推荐路线 B**：用 MetaboFlow 同时跑 5 个引擎处理 10 个公开数据集，系统性回答"混搭组合是否优于单引擎"。
 
 ### 7.2 算法创新论文路线（Phase 3-4 追加）
 

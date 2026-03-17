@@ -1,0 +1,15 @@
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/runtime-deps:8.0-noble
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY tests/e2e/tools/trfp-linux.zip /tmp/trfp-linux.zip
+RUN unzip /tmp/trfp-linux.zip -d /opt/trfp && \
+    chmod +x /opt/trfp/ThermoRawFileParser && \
+    rm /tmp/trfp-linux.zip
+
+VOLUME ["/raw", "/output"]
+
+ENTRYPOINT ["/opt/trfp/ThermoRawFileParser"]
+CMD ["-d", "/raw", "-o", "/output", "-f", "1"]

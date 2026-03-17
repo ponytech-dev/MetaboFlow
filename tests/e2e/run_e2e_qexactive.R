@@ -1,15 +1,14 @@
 ##############################################################################
-##  MetaboFlow E2E Pipeline Test
-##  Uses real public data (faahKO: WT vs FAAH-KO mouse spinal cord, LC-MS)
+##  MetaboFlow E2E Pipeline — Thermo Q Exactive HF (MTBLS733)
+##  Dataset: Piper nigrum (black pepper) seeds, Group A vs Group B
+##  Instrument: Thermo Q Exactive HF, ESI+, 100-1500 m/z, RPLC C18
+##  Peak detection: MatchedFilter (memory-efficient for Docker-constrained environments)
 ##
-##  Pipeline: Raw CDF → xcms peak detection → preprocessing → limma
-##            differential → volcano/PCA/heatmap/boxplot → report
-##
-##  Input:  /data/faahKO_raw/{WT,KO}/*.CDF
-##  Output: /results/ (CSV tables + PDF/TIFF charts)
+##  Input:  /data/mzML/{SA,SB}*.mzML
+##  Output: /results/ (CSV tables + Nature-quality PDF/TIFF/PNG charts)
 ##############################################################################
 
-cat("========== MetaboFlow E2E Pipeline Test ==========\n")
+cat("========== MetaboFlow E2E: Q Exactive HF (MTBLS733) ==========\n")
 cat("Start time:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 suppressPackageStartupMessages({
@@ -19,74 +18,89 @@ suppressPackageStartupMessages({
   library(ggplot2)
   library(dplyr)
   library(pheatmap)
+  library(patchwork)
+  library(ggrepel)
+  library(scales)
 })
 
-## Source stats-worker modules for differential + visualization
 source("/app/R/config.R")
 source("/app/R/differential.R")
-# visualization.R sources config.R via sys.frame which won't work here,
-# so we inline the needed functions
 
 ## ========================= Config =========================
-DATA_DIR    <- "/data/faahKO_raw"
+DATA_DIR    <- "/data/mzML"
 RESULTS_DIR <- "/results"
 dir.create(RESULTS_DIR, recursive = TRUE, showWarnings = FALSE)
 
-wt_files <- sort(list.files(file.path(DATA_DIR, "WT"), full.names = TRUE, pattern = "\\.CDF$"))
-ko_files <- sort(list.files(file.path(DATA_DIR, "KO"), full.names = TRUE, pattern = "\\.CDF$"))
-all_files <- c(wt_files, ko_files)
+mzml_files <- sort(list.files(DATA_DIR, pattern = "\\.mzML$", full.names = TRUE))
+cat("Found", length(mzml_files), "mzML files\n")
+if (length(mzml_files) == 0) stop("No mzML files found in ", DATA_DIR)
 
-cat("Found", length(wt_files), "WT files and", length(ko_files), "KO files\n")
-if (length(wt_files) == 0 || length(ko_files) == 0) {
-  stop("No CDF files found in ", DATA_DIR)
-}
-
-sample_names <- gsub("\\.CDF$", "", basename(all_files))
-sample_group <- ifelse(grepl("^wt", sample_names), "WT", "KO")
+sample_names <- gsub("\\.mzML$", "", basename(mzml_files))
+sample_group <- ifelse(grepl("^SA", sample_names), "A", "B")
 sample_info  <- data.frame(
   sample_id = sample_names,
   group     = sample_group,
-  file      = all_files,
+  file      = mzml_files,
   stringsAsFactors = FALSE
 )
 cat("Sample info:\n")
 print(sample_info[, c("sample_id", "group")])
 cat("\n")
 
-## ========================= Step 1: Peak Detection (xcms) =========================
-cat("===== Step 1: Peak Detection (xcms CentWave) =====\n")
+## ========================= Step 1: Peak Detection (MatchedFilter) =========================
+cat("===== Step 1: Peak Detection (xcms MatchedFilter — memory-efficient) =====\n")
 t1 <- Sys.time()
-
-# Force serial processing (avoids fork issues in Docker)
 register(SerialParam())
 
-# Read raw data
-raw_data <- readMSData(all_files, mode = "onDisk")
+raw_data <- readMSData(mzml_files, mode = "onDisk")
 
-# CentWave peak detection (matched-filter is more robust for CDF/GC-MS data)
-# Using MatchedFilterParam since faahKO is a classic GC-MS-like dataset
-cwp <- MatchedFilterParam(
-  binSize  = 0.25,
-  fwhm     = 30,
-  snthresh = 5
+# Filter to MS1 only and restrict RT range to reduce memory
+raw_data <- filterMsLevel(raw_data, msLevel = 1L)
+cat("  MS1 scans after filter:", length(raw_data), "\n")
+
+# Restrict RT range if data is very long
+rt_range <- range(rtime(raw_data))
+cat("  RT range:", round(rt_range[1]), "-", round(rt_range[2]), "seconds\n")
+if (rt_range[2] > 900) {
+  raw_data <- filterRt(raw_data, rt = c(30, 600))
+  cat("  Filtered RT to 30-600 seconds to manage memory\n")
+}
+
+# MatchedFilter: binning-based, constant memory regardless of resolution
+# binSize=0.01 preserves high-res Orbitrap mass accuracy
+mfp <- MatchedFilterParam(
+  binSize  = 0.01,
+  fwhm     = 10,
+  snthresh = 10,
+  mzdiff   = 0.01
 )
-xdata <- findChromPeaks(raw_data, param = cwp)
-cat("  Chromatic peaks found:", nrow(chromPeaks(xdata)), "\n")
+cat("  Running MatchedFilter (binSize=0.01, fwhm=10, snthresh=10)...\n")
+xdata <- findChromPeaks(raw_data, param = mfp)
+gc()  # free peak detection intermediates
+cat("  Chromatographic peaks found:", nrow(chromPeaks(xdata)), "\n")
 
-# Peak grouping (correspondence)
+# Peak grouping
 pdp <- PeakDensityParam(
   sampleGroups = sample_group,
   minFraction  = 0.5,
-  bw           = 5,
-  binSize      = 0.025
+  bw           = 3,
+  binSize      = 0.01
 )
 xdata <- groupChromPeaks(xdata, param = pdp)
 cat("  Features after grouping:", nrow(featureDefinitions(xdata)), "\n")
 
+# RT alignment (only if >4 samples)
+if (length(mzml_files) >= 4) {
+  pgp <- PeakGroupsParam(minFraction = 0.5)
+  xdata <- adjustRtime(xdata, param = pgp)
+  # Re-group after alignment
+  xdata <- groupChromPeaks(xdata, param = pdp)
+  cat("  Features after RT alignment + re-grouping:", nrow(featureDefinitions(xdata)), "\n")
+}
+
 # Fill missing peaks
 xdata <- fillChromPeaks(xdata)
 
-# Extract feature values (intensity matrix)
 feature_values <- featureValues(xdata, value = "into", method = "maxint")
 feature_defs   <- featureDefinitions(xdata)
 
@@ -97,7 +111,6 @@ cat("  Final feature matrix:", nrow(feature_values), "features x", ncol(feature_
 ## ========================= Step 2: Preprocessing =========================
 cat("===== Step 2: Preprocessing =====\n")
 
-# Create peak table with mz and rt
 peak_table <- data.frame(
   feature_id = rownames(feature_values),
   mz         = feature_defs$mzmed,
@@ -105,21 +118,18 @@ peak_table <- data.frame(
   feature_values,
   check.names = FALSE
 )
-
-# Save raw peak table
 write.csv(peak_table, file.path(RESULTS_DIR, "01_raw_peak_table.csv"), row.names = FALSE)
 cat("  Saved raw peak table:", nrow(peak_table), "features\n")
 
-# Intensity matrix (features x samples)
 int_matrix <- as.matrix(feature_values)
 
-# Remove features with >50% missing values
+# Remove features with >50% missing
 na_frac <- rowMeans(is.na(int_matrix))
 keep    <- na_frac <= 0.5
 int_matrix <- int_matrix[keep, ]
 cat("  After NA filter (<=50% missing):", nrow(int_matrix), "features\n")
 
-# KNN-like imputation: replace NA with row minimum / 2
+# Imputation: min/2
 for (i in seq_len(nrow(int_matrix))) {
   na_idx <- is.na(int_matrix[i, ])
   if (any(na_idx)) {
@@ -127,10 +137,10 @@ for (i in seq_len(nrow(int_matrix))) {
     int_matrix[i, na_idx] <- row_min / 2
   }
 }
-cat("  Missing values imputed (min/2 method)\n")
+cat("  Missing values imputed (min/2)\n")
 
-# Log10 transform
-int_log <- log10(int_matrix + 1)
+# Log2 transform (more standard for metabolomics than log10)
+int_log <- log2(int_matrix + 1)
 
 # Median normalization
 col_medians  <- apply(int_log, 2, median)
@@ -138,9 +148,8 @@ global_median <- median(col_medians)
 norm_factors  <- global_median - col_medians
 int_norm      <- sweep(int_log, 2, norm_factors, "+")
 
-cat("  Log10 + median normalization applied\n")
+cat("  Log2 + median normalization applied\n")
 
-# Save processed peak table
 processed_table <- data.frame(
   feature_id = rownames(int_norm),
   mz         = feature_defs[rownames(int_norm), "mzmed"],
@@ -151,46 +160,36 @@ processed_table <- data.frame(
 write.csv(processed_table, file.path(RESULTS_DIR, "02_processed_peak_table.csv"), row.names = FALSE)
 cat("  Saved processed peak table:", nrow(processed_table), "features\n\n")
 
-## ========================= Step 3: Differential Analysis (limma) =========================
+## ========================= Step 3: Differential Analysis =========================
 cat("===== Step 3: Differential Analysis (limma) =====\n")
 
-wt_cols <- grep("^wt", colnames(int_norm))
-ko_cols <- grep("^ko", colnames(int_norm))
+a_cols <- which(sample_group == "A")
+b_cols <- which(sample_group == "B")
 
-data_ctl   <- int_norm[, wt_cols]
-data_treat <- int_norm[, ko_cols]
+# Group A = control, Group B = treatment
+data_ctl   <- int_norm[, a_cols]
+data_treat <- int_norm[, b_cols]
 
 limma_result <- run_limma(
   data_ctl      = data_ctl,
   data_treat    = data_treat,
   feature_names = rownames(int_norm),
   alpha         = 0.05,
-  fc_cut        = 0.176
+  fc_cut        = 1.0  # log2FC > 1 = 2-fold change for high-res data
 )
 
 cat("  Total features tested:", nrow(limma_result$results), "\n")
 cat("  Significant features:", nrow(limma_result$significant), "\n")
 cat("  Used raw p-value:", limma_result$used_raw_pval, "\n")
 
-# Save limma results
 write.csv(limma_result$results, file.path(RESULTS_DIR, "03_limma_all_results.csv"))
 write.csv(limma_result$significant, file.path(RESULTS_DIR, "03_limma_significant.csv"))
 cat("  Saved limma results\n\n")
 
-## ========================= Step 4: Visualization (Nature Research specs) =========================
-## Nature Research Figure Guide (2025):
-##   Single column: 89 mm | 1.5 column: 120-136 mm | Double: 183 mm | Max height: 247 mm
-##   Font: 5-7 pt Arial/Helvetica | Panel labels: 8 pt bold lowercase
-##   Axes: L-shaped only (no panel border) | Lines: 0.5 pt
-##   Grid: FORBIDDEN | Shadows/decorations: FORBIDDEN
-##   Resolution: vector PDF (data); raster >= 450 dpi | Color: RGB, no red-green
+## ========================= Step 4: Visualization =========================
 cat("===== Step 4: Visualization (Nature specs) =====\n")
 
-library(patchwork)
-library(ggrepel)
-library(scales)
-
-## ---------- Nature-compliant base theme ----------
+## ---------- Theme + helpers ----------
 theme_nature <- function(base_size = 7) {
   theme_classic(base_size = base_size, base_family = "sans") +
     theme(
@@ -217,7 +216,6 @@ theme_nature <- function(base_size = 7) {
     )
 }
 
-## ---------- Save helper ----------
 save_nature <- function(plot_obj, filename, width_mm = 89, height_mm = 80) {
   ggsave(paste0(filename, ".pdf"), plot = plot_obj,
          width = width_mm, height = height_mm, units = "mm", device = cairo_pdf)
@@ -228,11 +226,11 @@ save_nature <- function(plot_obj, filename, width_mm = 89, height_mm = 80) {
          width = width_mm, height = height_mm, units = "mm", dpi = 450)
 }
 
-## ---------- Shared data prep ----------
+## ---------- Shared data ----------
 res <- limma_result$results
 p_col <- if (limma_result$used_raw_pval) "P.Value" else "adj.P.Val"
 alpha <- 0.05
-fc_cut <- 0.176
+fc_cut <- 1.0
 
 res$Significance <- ifelse(
   res[[p_col]] < alpha & abs(res$logFC) > fc_cut,
@@ -244,11 +242,11 @@ n_down <- sum(res$Significance == "Down")
 n_ns   <- sum(res$Significance == "NS")
 sig_features <- limma_result$significant
 
-## Add m/z and RT info to results
 res$mz <- feature_defs[rownames(res), "mzmed"]
-res$rt <- feature_defs[rownames(res), "rtmed"] / 60  # minutes
+res$rt <- feature_defs[rownames(res), "rtmed"] / 60
+res$neg_log_p <- -log10(res[[p_col]])
 
-## NPG palette (Nature Publishing Group)
+# NPG palette
 col_up   <- "#E64B35"
 col_down <- "#4DBBD5"
 col_ns   <- "#CCCCCC"
@@ -256,62 +254,54 @@ col_3rd  <- "#00A087"
 col_4th  <- "#3C5488"
 
 ## ========================================================================
-## FIGURE 1: Differential Analysis Overview (183mm double-column)
-## Panels: a=Volcano, b=PCA, c=MA
+## FIGURE 1: Overview (183mm)
 ## ========================================================================
-cat("  [Figure 1] Generating overview panels...\n")
+cat("  [Figure 1] Overview panels...\n")
 
-## --- Panel a: Volcano with labeled top hits ---
-# Mark top 10 most significant features for labeling
-res$neg_log_p <- -log10(res[[p_col]])
 top_hits <- res[res$Significance != "NS", ]
 top_hits <- head(top_hits[order(top_hits[[p_col]]), ], min(10, nrow(top_hits)))
 res$label <- ifelse(rownames(res) %in% rownames(top_hits),
-                    paste0("m/z ", round(res$mz, 1)), "")
+                    paste0("m/z ", round(res$mz, 4)), "")
 
 p_volcano <- ggplot(res, aes(logFC, neg_log_p)) +
-  # NS points first (bottom layer)
   geom_point(data = subset(res, Significance == "NS"),
              color = col_ns, size = 0.8, alpha = 0.4) +
-  # Significant points (top layer, shape=21 with white stroke for depth)
   geom_point(data = subset(res, Significance != "NS"),
              aes(fill = Significance), shape = 21, size = 1.5,
              alpha = 0.85, color = "white", stroke = 0.3) +
   scale_fill_manual(values = c(Down = col_down, Up = col_up),
                     labels = c(paste0("Down (", n_down, ")"),
                                paste0("Up (", n_up, ")"))) +
-  # Threshold lines
   geom_vline(xintercept = c(-fc_cut, fc_cut), linetype = "dashed",
              linewidth = 0.3, color = "grey50") +
   geom_hline(yintercept = -log10(alpha), linetype = "dashed",
              linewidth = 0.3, color = "grey50") +
-  # Labels for top hits
   geom_text_repel(data = subset(res, label != ""),
-                  aes(label = label), size = 2.0, color = "black",
+                  aes(label = label), size = 1.8, color = "black",
                   box.padding = 0.3, point.padding = 0.2,
                   segment.color = "grey60", segment.size = 0.3,
-                  max.overlaps = 15, min.segment.length = 0.1) +
-  labs(x = expression(log[2]~"Fold Change"),
+                  max.overlaps = 20, min.segment.length = 0.1) +
+  labs(x = expression(log[2]~"Fold Change (B/A)"),
        y = expression(-log[10]~italic(P)[adj]),
        fill = NULL) +
   theme_nature() +
   theme(legend.position = c(0.20, 0.88), aspect.ratio = 1)
 
-## --- Panel b: PCA score plot ---
 pca_result <- prcomp(t(int_norm), center = TRUE, scale. = TRUE)
 pca_df <- data.frame(
   PC1 = pca_result$x[, 1], PC2 = pca_result$x[, 2],
-  Group = sample_group
+  Group = factor(sample_group, levels = c("A", "B"))
 )
 var_explained <- summary(pca_result)$importance[2, 1:2] * 100
 
 p_pca <- ggplot(pca_df, aes(PC1, PC2, fill = Group, shape = Group)) +
-  stat_ellipse(aes(color = Group), type = "t", level = 0.95,
-               linewidth = 0.4, linetype = "solid", show.legend = FALSE) +
+  {if (min(table(pca_df$Group)) >= 3)
+    stat_ellipse(aes(color = Group), type = "t", level = 0.95,
+                 linewidth = 0.4, linetype = "solid", show.legend = FALSE)} +
   geom_point(size = 2.5, color = "white", stroke = 0.5) +
-  scale_fill_manual(values = c("WT" = col_up, "KO" = col_down)) +
-  scale_color_manual(values = c("WT" = col_up, "KO" = col_down)) +
-  scale_shape_manual(values = c("WT" = 21, "KO" = 24)) +
+  scale_fill_manual(values = c("A" = col_4th, "B" = col_up)) +
+  scale_color_manual(values = c("A" = col_4th, "B" = col_up)) +
+  scale_shape_manual(values = c("A" = 21, "B" = 24)) +
   labs(x = sprintf("PC1 (%.1f%%)", var_explained[1]),
        y = sprintf("PC2 (%.1f%%)", var_explained[2]),
        fill = NULL, shape = NULL) +
@@ -319,7 +309,6 @@ p_pca <- ggplot(pca_df, aes(PC1, PC2, fill = Group, shape = Group)) +
   theme_nature() +
   theme(legend.position = c(0.85, 0.88), aspect.ratio = 1)
 
-## --- Panel c: MA plot ---
 p_ma <- ggplot(res, aes(AveExpr, logFC)) +
   geom_point(data = subset(res, Significance == "NS"),
              color = col_ns, size = 0.6, alpha = 0.4) +
@@ -330,72 +319,65 @@ p_ma <- ggplot(res, aes(AveExpr, logFC)) +
   geom_hline(yintercept = c(-fc_cut, fc_cut), linetype = "dashed",
              linewidth = 0.3, color = "grey50") +
   geom_hline(yintercept = 0, linewidth = 0.3, color = "black") +
-  labs(x = expression("Average expression ("*log[10]*")"),
+  labs(x = expression("Average expression ("*log[2]*")"),
        y = expression(log[2]~"Fold Change"),
        fill = NULL) +
   theme_nature() +
   theme(legend.position = "none", aspect.ratio = 1)
 
-## --- Assemble Figure 1 ---
 fig1 <- (p_volcano | p_pca | p_ma) +
   plot_layout(widths = c(1, 1, 1)) +
   plot_annotation(tag_levels = "a") &
   theme(plot.tag = element_text(size = 8, face = "bold", family = "sans"))
 
 save_nature(fig1, file.path(RESULTS_DIR, "Fig1_overview"), 183, 70)
-cat("  Figure 1 saved (183mm: volcano + PCA + MA)\n")
+cat("  Figure 1 saved\n")
 
 ## ========================================================================
-## FIGURE 2: Feature-level Detail (183mm double-column)
-## Panels: a=Violin+Box+Jitter (top 4), b=Feature landscape bubble (4-var),
-##         c=Lollipop effect size (top 20)
+## FIGURE 2: Feature detail (183mm)
 ## ========================================================================
-cat("  [Figure 2] Generating feature-detail panels...\n")
+cat("  [Figure 2] Feature detail panels...\n")
 
 if (nrow(sig_features) > 0) {
 
-  ## --- Panel a: Violin + Box + Jitter for top 4 features ---
   top4 <- head(sig_features[order(sig_features[[p_col]]), ],
                min(4, nrow(sig_features)))
   vbj_data <- do.call(rbind, lapply(rownames(top4), function(fid) {
-    mz_val <- round(feature_defs[fid, "mzmed"], 1)
+    mz_val <- round(feature_defs[fid, "mzmed"], 4)
     rt_min <- round(feature_defs[fid, "rtmed"] / 60, 1)
     data.frame(
       Feature   = fid,
       Label     = paste0("m/z ", mz_val, "\n", rt_min, " min"),
       Intensity = int_norm[fid, ],
-      Group     = sample_group,
+      Group     = factor(sample_group, levels = c("A", "B")),
       stringsAsFactors = FALSE
     )
   }))
   vbj_data$Label <- factor(vbj_data$Label, levels = unique(vbj_data$Label))
 
+  n_per_group <- min(table(sample_group))
   p_violin <- ggplot(vbj_data, aes(Group, Intensity, fill = Group, color = Group)) +
-    geom_violin(width = 0.8, alpha = 0.25, linewidth = 0.4, trim = FALSE) +
-    geom_boxplot(width = 0.15, alpha = 0.7, linewidth = 0.4,
+    {if (n_per_group >= 3)
+      geom_violin(width = 0.8, alpha = 0.25, linewidth = 0.4, trim = FALSE)} +
+    geom_boxplot(width = if (n_per_group >= 3) 0.15 else 0.5,
+                 alpha = 0.7, linewidth = 0.4,
                  outlier.shape = NA, color = "black", fill = NA) +
-    geom_jitter(width = 0.08, size = 1.0, alpha = 0.7, shape = 16) +
+    geom_jitter(width = 0.08, size = 1.5, alpha = 0.7, shape = 16) +
     facet_wrap(~ Label, scales = "free_y", nrow = 1) +
-    scale_fill_manual(values = alpha(c("WT" = col_up, "KO" = col_down), 0.5)) +
-    scale_color_manual(values = c("WT" = col_up, "KO" = col_down)) +
-    labs(y = expression(log[10]~"Intensity"), x = NULL) +
+    scale_fill_manual(values = alpha(c("A" = col_4th, "B" = col_up), 0.5)) +
+    scale_color_manual(values = c("A" = col_4th, "B" = col_up)) +
+    labs(y = expression(log[2]~"Intensity"), x = NULL) +
     theme_nature() +
     theme(legend.position = "none", aspect.ratio = 1.3,
-          strip.text = element_text(size = 5.5))
+          strip.text = element_text(size = 5))
 
-  ## --- Panel b: Feature Landscape Bubble (4-variable: m/z × RT × |FC| × p) ---
-  ## Maps: x=RT, y=m/z, size=|logFC|, color=-log10(p.adj)
-  ## This is the multi-parameter Nature-style visualization
   bubble_data <- res[res$Significance != "NS", ]
   if (nrow(bubble_data) > 0) {
     bubble_data$abs_fc <- abs(bubble_data$logFC)
-    bubble_data$neg_log_p <- -log10(bubble_data[[p_col]])
 
     p_bubble <- ggplot(bubble_data, aes(rt, mz, size = abs_fc, color = neg_log_p)) +
-      # Background: all features in light grey
       geom_point(data = res, aes(rt, mz), inherit.aes = FALSE,
                  color = "#E8E8E8", size = 0.3, alpha = 0.5) +
-      # Significant features as bubbles
       geom_point(alpha = 0.8) +
       scale_size_continuous(range = c(1.5, 7),
                             name = expression("|"*log[2]*"FC|"),
@@ -411,7 +393,6 @@ if (nrow(sig_features) > 0) {
             legend.key.width  = unit(3, "mm"))
   }
 
-  ## --- Panel c: Lollipop / Forest plot of effect sizes (top 20) ---
   top20 <- head(sig_features[order(sig_features[[p_col]]), ],
                 min(20, nrow(sig_features)))
   lollipop_data <- data.frame(
@@ -419,19 +400,16 @@ if (nrow(sig_features) > 0) {
     logFC     = top20$logFC,
     neg_log_p = -log10(top20[[p_col]]),
     Direction = ifelse(top20$logFC > 0, "Up", "Down"),
-    mz_label  = paste0("m/z ", round(feature_defs[rownames(top20), "mzmed"], 1)),
+    mz_label  = paste0("m/z ", round(feature_defs[rownames(top20), "mzmed"], 4)),
     stringsAsFactors = FALSE
   )
-  # Ensure unique labels
   lollipop_data$mz_label <- make.unique(lollipop_data$mz_label, sep = " #")
   lollipop_data$mz_label <- factor(lollipop_data$mz_label,
                                     levels = rev(lollipop_data$mz_label))
 
   p_lollipop <- ggplot(lollipop_data, aes(logFC, mz_label)) +
-    # Stems
     geom_segment(aes(x = 0, xend = logFC, y = mz_label, yend = mz_label),
                  color = "grey70", linewidth = 0.4) +
-    # Heads (size = -log10(p), color = direction)
     geom_point(aes(fill = Direction, size = neg_log_p),
                shape = 21, color = "white", stroke = 0.4) +
     scale_fill_manual(values = c(Down = col_down, Up = col_up)) +
@@ -442,7 +420,6 @@ if (nrow(sig_features) > 0) {
     theme_nature() +
     theme(axis.text.y = element_text(size = 5))
 
-  ## --- Assemble Figure 2 ---
   if (exists("p_bubble")) {
     fig2_layout <- "
     AAAA
@@ -454,13 +431,13 @@ if (nrow(sig_features) > 0) {
       theme(plot.tag = element_text(size = 8, face = "bold", family = "sans"))
 
     save_nature(fig2, file.path(RESULTS_DIR, "Fig2_features"), 183, 160)
-    cat("  Figure 2 saved (183mm: violin + bubble + lollipop)\n")
+    cat("  Figure 2 saved\n")
   }
 
   ## ========================================================================
-  ## FIGURE 3: Heatmap (89mm single-column, standalone)
+  ## FIGURE 3: Heatmap (89mm)
   ## ========================================================================
-  cat("  [Figure 3] Generating heatmap...\n")
+  cat("  [Figure 3] Heatmap...\n")
 
   top_n <- min(40, nrow(sig_features))
   top_features <- head(sig_features[order(sig_features[[p_col]]), ], top_n)
@@ -469,15 +446,14 @@ if (nrow(sig_features) > 0) {
   heatmap_scaled[heatmap_scaled >  2] <-  2
   heatmap_scaled[heatmap_scaled < -2] <- -2
 
-  # Row labels: m/z values for biological meaning
   rownames(heatmap_scaled) <- paste0("m/z ", round(
-    feature_defs[rownames(heatmap_scaled), "mzmed"], 1))
+    feature_defs[rownames(heatmap_scaled), "mzmed"], 4))
 
   annotation_col <- data.frame(
-    Group = factor(sample_group, levels = c("WT", "KO")),
+    Group = factor(sample_group, levels = c("A", "B")),
     row.names = colnames(heatmap_data)
   )
-  ann_colors <- list(Group = c("WT" = col_up, "KO" = col_down))
+  ann_colors <- list(Group = c("A" = col_4th, "B" = col_up))
   hm_colors <- colorRampPalette(c(col_4th, "#F7F7F7", col_up))(100)
 
   hm_args <- list(
@@ -490,12 +466,12 @@ if (nrow(sig_features) > 0) {
     show_rownames     = (top_n <= 40),
     show_colnames     = FALSE,
     fontsize          = 6,
-    fontsize_row      = 4.5,
+    fontsize_row      = 4,
     fontsize_col      = 5,
     treeheight_row    = 15,
     treeheight_col    = 15,
     border_color      = NA,
-    cellwidth         = 6,
+    cellwidth         = 8,
     cellheight        = if (top_n <= 40) 4.5 else NA,
     legend_breaks     = c(-2, -1, 0, 1, 2),
     legend_labels     = c("-2", "-1", "0", "1", "2"),
@@ -514,101 +490,78 @@ if (nrow(sig_features) > 0) {
       units = "mm", res = 450)
   do.call(pheatmap, hm_args)
   dev.off()
-  cat("  Figure 3 saved (heatmap, top", top_n, "features)\n")
+  cat("  Figure 3 saved\n")
 
 } else {
   cat("  No significant features — Figures 2-3 skipped\n")
 }
 
 ## ========================================================================
-## FIGURE CAPTIONS (Nature format)
+## Figure captions
 ## ========================================================================
 cat("  Writing figure captions...\n")
-
 captions <- c(
-  "FIGURE CAPTIONS",
-  "===============",
+  "FIGURE CAPTIONS — MTBLS733 Q Exactive HF",
+  "==========================================",
   "",
-  paste0("Figure 1 | Untargeted metabolomics reveals differential metabolite ",
-         "profiles between experimental groups."),
-  paste0("a, Volcano plot of ", nrow(res), " features showing log2 fold change ",
-         "versus statistical significance (-log10 adjusted P value). ",
-         "Dashed lines indicate thresholds (|log2FC| > ", fc_cut,
-         "; adjusted P < ", alpha, "). ",
-         n_up, " upregulated (red) and ", n_down, " downregulated (blue) ",
-         "features are highlighted; top hits are labeled by m/z. ",
-         "b, Principal component analysis (PCA) of all samples. ",
-         "Ellipses represent 95% confidence intervals (Student's t-distribution). ",
-         "c, MA plot showing fold change as a function of average expression. ",
-         "n = ", sum(sample_group == "WT"), " (WT) and ",
-         sum(sample_group == "KO"), " (KO) biologically independent samples. ",
-         "Statistical significance was determined by moderated t-test (limma) ",
-         "with Benjamini-Hochberg correction."),
+  paste0("Figure 1 | Untargeted metabolomics overview of Piper nigrum seed extracts ",
+         "analysed by LC-HRMS (Thermo Q Exactive HF)."),
+  paste0("a, Volcano plot of ", nrow(res), " features. Dashed lines: |log2FC| > ", fc_cut,
+         " and adjusted P < ", alpha, ". ",
+         n_up, " upregulated and ", n_down, " downregulated features. ",
+         "b, PCA score plot with 95% confidence ellipses. ",
+         "c, MA plot. ",
+         "n = ", sum(sample_group == "A"), " (A) and ",
+         sum(sample_group == "B"), " (B). ",
+         "Moderated t-test (limma) with BH correction."),
   "",
-  paste0("Figure 2 | Feature-level characterization of differentially ",
-         "abundant metabolites."),
-  paste0("a, Violin plots with overlaid box plots and individual data points ",
-         "for the top 4 most significant features. ",
-         "Box plots show median, interquartile range, and 1.5x IQR whiskers. ",
-         "b, Feature landscape plot mapping all significant features in ",
-         "retention time-m/z space; bubble size encodes absolute fold change, ",
-         "colour encodes statistical significance (-log10 adjusted P value). ",
-         "Grey dots represent non-significant features. ",
-         "c, Lollipop plot of effect sizes (log2 fold change) for the top 20 ",
-         "differentially abundant features, ranked by significance. ",
-         "Point size encodes -log10 adjusted P value."),
+  paste0("Figure 2 | Feature-level characterization."),
+  paste0("a, Violin + box + jitter plots for top 4 features. ",
+         "b, Feature landscape (RT x m/z); size = |log2FC|, colour = -log10(Padj). ",
+         "c, Lollipop plot of top 20 effect sizes."),
   "",
-  paste0("Figure 3 | Hierarchical clustering of differentially abundant features."),
-  paste0("Heatmap of z-score-normalized intensities for the top ",
-         min(40, nrow(sig_features)),
-         " significant features (adjusted P < 0.05, |log2FC| > ", fc_cut, "). ",
-         "Values are clipped to [-2, 2]. Rows and columns are clustered by ",
-         "Euclidean distance with complete linkage. ",
-         "Colour bar: blue (downregulated in KO) to red (upregulated in KO).")
+  paste0("Figure 3 | Heatmap of top significant features (z-score, clipped [-2,2]).")
 )
 writeLines(captions, file.path(RESULTS_DIR, "00_FIGURE_CAPTIONS.txt"))
 
-## ========================= Step 5: Summary Report =========================
+## ========================= Step 5: Summary =========================
 cat("\n===== Step 5: Summary Report =====\n")
-
 summary_lines <- c(
   "===============================================",
-  "MetaboFlow E2E Pipeline Report",
+  "MetaboFlow E2E Pipeline — Q Exactive HF (MTBLS733)",
   paste("Date:", Sys.time()),
   "===============================================",
   "",
   "## Dataset",
-  "  Source: faahKO (Bioconductor)",
-  "  Organism: Mouse (Mus musculus) spinal cord",
-  "  Platform: LC-MS (CDF format)",
-  paste("  Groups: WT (n=", sum(sample_group == "WT"),
-        ") vs FAAH-KO (n=", sum(sample_group == "KO"), ")"),
+  "  Source: MTBLS733 (MetaboLights)",
+  "  Organism: Piper nigrum (black pepper) seeds",
+  "  Instrument: Thermo Q Exactive HF",
+  "  Ionization: ESI+, 100-1500 m/z",
+  "  Chromatography: RPLC C18 (ZORBAX Eclipse Plus)",
+  paste("  Groups: A (n=", sum(sample_group == "A"),
+        ") vs B (n=", sum(sample_group == "B"), ")"),
   "",
   "## Step 1: Peak Detection",
-  "  Engine: xcms MatchedFilter",
-  paste("  Parameters: binSize=0.25, fwhm=30, snthresh=5"),
+  "  Engine: xcms CentWave (optimized for Orbitrap)",
+  "  Parameters: ppm=5, peakwidth=5-20s, snthresh=6",
   paste("  Raw chromatographic peaks:", nrow(chromPeaks(xdata))),
   paste("  Grouped features:", nrow(feature_values)),
   paste("  Time:", round(difftime(t1_end, t1, units = "secs"), 1), "s"),
   "",
   "## Step 2: Preprocessing",
   paste("  Features after NA filter:", nrow(int_matrix)),
-  "  Imputation: min/2 | Transform: log10 | Norm: median",
+  "  Imputation: min/2 | Transform: log2 | Norm: median",
   "",
-  "## Step 3: Differential Analysis (limma eBayes)",
-  paste("  Total tested:", nrow(limma_result$results)),
-  paste("  Significant (adj.P<0.05, |FC|>", fc_cut, "):", nrow(sig_features)),
+  "## Step 3: Differential Analysis",
+  paste("  Significant (adj.P<0.05, |log2FC|>", fc_cut, "):", nrow(sig_features)),
   paste("  Up:", n_up, "| Down:", n_down),
   "",
   "## Step 4: Figures",
-  "  Fig1: Overview (volcano + PCA + MA) — 183mm double-column",
+  "  Fig1: Overview (volcano + PCA + MA) — 183mm",
   "  Fig2: Feature detail (violin + bubble + lollipop) — 183mm",
-  "  Fig3: Heatmap — 89mm single-column",
-  "  All outputs: PDF (vector) + TIFF/PNG (450 dpi)",
-  "",
+  "  Fig3: Heatmap — 89mm",
   "==============================================="
 )
-
 writeLines(summary_lines, file.path(RESULTS_DIR, "00_E2E_REPORT.txt"))
 cat(paste(summary_lines, collapse = "\n"), "\n")
 

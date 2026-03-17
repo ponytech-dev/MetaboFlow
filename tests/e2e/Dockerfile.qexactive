@@ -16,13 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install R packages: xcms (peak detection), limma (differential), ggplot2 (viz)
+# Install R packages
 RUN Rscript -e " \
     options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!requireNamespace('BiocManager', quietly = TRUE)) \
         install.packages('BiocManager'); \
     BiocManager::install(version = '3.20', ask = FALSE, update = FALSE); \
-    # Core Bioconductor packages
     BiocManager::install(c('xcms', 'limma', 'MSnbase'), ask = FALSE, update = FALSE); \
     install.packages(c( \
         'ggplot2', 'dplyr', 'tidyr', 'pheatmap', 'patchwork', \
@@ -35,15 +34,14 @@ RUN Rscript -e " \
 
 WORKDIR /app
 
-# Copy stats-worker R modules (config.R, differential.R, visualization.R)
+# Copy stats-worker R modules
 COPY packages/engines/stats-worker/R/config.R /app/R/config.R
 COPY packages/engines/stats-worker/R/differential.R /app/R/differential.R
 COPY packages/engines/stats-worker/R/visualization.R /app/R/visualization.R
 
-# Copy E2E test script
-COPY tests/e2e/run_e2e_pipeline.R /app/run_e2e_pipeline.R
+# Copy Q Exactive pipeline script
+COPY tests/e2e/run_e2e_qexactive.R /app/run_e2e_qexactive.R
 
-# Data and results mount points
 VOLUME ["/data", "/results"]
 
-CMD ["Rscript", "/app/run_e2e_pipeline.R"]
+CMD ["Rscript", "/app/run_e2e_qexactive.R"]
