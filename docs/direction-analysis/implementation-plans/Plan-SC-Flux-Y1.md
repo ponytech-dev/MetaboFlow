@@ -1,1031 +1,467 @@
-# 单细胞代谢物→通量约束 Y1 实施计划
-
-## 项目概览
+# 单细胞代谢物直接约束通量预测 — 第一年研究计划
 
 **项目代号**：scMFC（Single-cell Metabolite Flux Constraining）
 
 **核心假设**：MALDI成像质谱测量的单细胞代谢物相对强度，可直接用于约束FBA通量方向，其预测精度优于依赖转录组间接推断的现有方法。
 
-**时间线**：M1-M6（POC阶段）→ M7-18（NatMethods升级阶段）
+**时间线**：M1–M6（概念验证阶段）→ M7–M18（NatMethods升级阶段）
 
 ---
 
-## 1. 前期准备清单
+## 一、研究背景
 
-### 1.1 FBA框架选择
+### 1.1 单细胞代谢组学的兴起
 
-**主框架：COBRApy 0.29.x**
+细胞代谢是生命活动的核心执行层。传统代谢组学以细胞群体为单位，所得信号是数万乃至数百万细胞的平均，彻底掩盖了细胞间的个体差异。2016年以来，单细胞分辨率的代谢测量技术取得了突破性进展，其中最具代表性的是基于MALDI成像质谱（MALDI Imaging Mass Spectrometry, MALDI-IMS）的空间代谢组学路线。
 
-选择理由：
-- Python生态，与scanpy/anndata无缝集成
-- 支持FVA（通量变异性分析）——这是通量方向约束的核心工具
-- 社区最活跃，Recon3D加载已有成熟案例
-- 支持线性规划后端切换（默认GLPK，可升级为Gurobi学术版提速10-50倍）
+**MALDI成像技术原理**：MALDI-IMS以激光逐点扫描组织或培养细胞切片，在每个扫描点生成一张质谱图，记录当前位置所有可电离代谢物的m/z及相对强度。结合细胞分割算法，可将每个细胞的代谢物信号从背景噪声中分离，获得单细胞分辨率的代谢物强度矩阵。
 
-依赖安装清单：
+**SpaceM技术**：Rappez等人（Nature Methods, 2021）开发了SpaceM流程，系统性地解决了MALDI单细胞代谢组学的细胞分割、离子图像配准和代谢物注释问题，将可靠检测的代谢物数量提升至约100种，检测细胞数达数千个规模。2025年发表的HT-SpaceM（Cell, 2025）在此基础上进一步扩展至高通量组织微阵列格式，单次实验可测量140,000余个细胞，涵盖约100种代谢物，其中73种经独立LC-MS/MS验证。HT-SpaceM的发表标志着单细胞MALDI代谢组学正式进入可规模化应用阶段，也为本研究提供了核心数据来源。
 
-```
-cobrapython==0.29.0
-gurobipy==11.x（学术许可，免费申请）
-cobra==0.29.0
-memote==0.13.x（模型质量检查）
-escher==1.7.x（通量可视化）
-```
+**技术局限**：MALDI-IMS测量的是代谢物的相对强度（取决于电离效率、基质效应、细胞大小等因素），而非绝对浓度（单位：mM）。这一特性决定了现有单细胞通量推断框架无法直接沿用——而这正是本研究方法创新的出发点。
 
-替代方案评估：
-- **MATLAB COBRA Toolbox**：放弃，Python流水线与其集成代价过高
-- **RAVEN**：MATLAB，放弃
-- **openCOBRA / FBA in R**：放弃，scRNA-seq基线METAFlux本身用R，但核心算法用Python更利于后续扩展
+### 1.2 通量平衡分析（FBA）与热力学FBA（tFBA）的理论基础
 
-**关键技术选择：FVA而非单次FBA**
+**FBA基本框架**：通量平衡分析（Flux Balance Analysis, FBA）是计算代谢通量的标准方法。其核心假设是稳态假设（steady-state assumption）：在稳态下，代谢物的净生产率等于净消耗率，即化学计量矩阵 $S$ 与通量向量 $v$ 满足 $S \cdot v = 0$。结合生物学上下界约束（如葡萄糖摄取速率）和目标函数（如最大化生物量合成），FBA通过线性规划求解通量分布。
 
-原因：单次FBA解不唯一，对于"通量方向"这个研究问题，FVA给出每个反应的通量下界和上界，可直接判断方向（下界>0为正向，上界<0为逆向，跨零为可双向）。这与相对浓度约束逻辑完全吻合。
+FBA的根本困难在于解的不唯一性：满足约束的通量解空间通常是一个高维多面体，存在无数等价最优解。通量变异性分析（Flux Variability Analysis, FVA）通过计算每个反应在所有最优解中通量的上界和下界，将这种不确定性定量化。FVA的输出可直接判断通量方向：下界 > 0 为必然正向，上界 < 0 为必然逆向，区间跨零为方向不定。
 
-### 1.2 代谢网络模型选择
+**tFBA框架**：热力学FBA（Thermodynamic FBA, tFBA；Henry et al., Biophysical Journal, 2007）在FBA的化学计量约束基础上，叠加热力学可行性约束。其核心方程为：
 
-**主模型：Recon3D（2018版，BIGG ID: Recon3D）**
+$$\Delta G'_r = \Delta G'^{\circ}_r + RT \sum_i \nu_i \ln(c_i) < 0$$
 
-具体版本：Recon3D 1.01（Brunk et al., Nature Biotechnology 2018）
+即每个自发进行的反应，其吉布斯自由能变化必须为负。该约束需要每种代谢物的绝对胞内浓度 $c_i$（单位：mM）。tFBA已在E. coli等模型系统中展示出显著优于标准FBA的通量方向预测能力，是迄今理论最严谨的通量方向推断框架。
 
-选择理由：
-- 覆盖8000+反应，4000+代谢物，600+通路
-- 包含细胞内定位（胞质/线粒体/ER等），代谢物浓度约束可以按隔室加
-- 比Recon2.2更新，模型精度更高
-- 有详细的代谢物ChEBI/HMDB/PubChem注释，利于与MALDI数据mapping
+**tFBA的不可达性**：tFBA对绝对浓度的要求，恰恰是单细胞MALDI代谢组学无法提供的。从MALDI相对强度到绝对浓度的转换，需要细胞特异性内标或绝对定量体系，这在现有技术条件下对单细胞层面是不可行的。本研究的核心方法创新，正是在放弃绝对浓度要求的前提下，仍然从相对强度中提取热力学约束信息。
 
-**备用模型：Human-GEM 1.18.0**（Yang et al., Science Signaling 2020）
+### 1.3 现有单细胞通量预测方法的综述与局限
 
-Human-GEM在Recon3D基础上进一步整合了基因-反应-蛋白质关联（GPR），如果后续需要与scRNA-seq比较时使用，逻辑更自洽。
+目前主流的单细胞通量推断方法均以转录组为输入，通过"基因表达→酶活性→通量"的间接路径推断代谢通量。
 
-**子网络策略（关键决策）**：
+**METAFlux**（Zheng et al., Nature Communications, 2023）：使用弹性网（Elastic Net）回归将scRNA-seq基因表达量映射为FBA模型的通量约束，再通过FBA求解单细胞通量分布。METAFlux在多个癌症数据集上展示了识别代谢亚群的能力，是当前影响力最大的单细胞通量推断工具。
 
-由于73个LC-MS验证代谢物覆盖Recon3D 4000+节点的覆盖率极低（约1.8%），不能直接约束全网络。具体子网络选择见第4节。
+**scFEA**（Zhao et al., Genome Research, 2021）：以图神经网络建模代谢网络，将scRNA-seq输入映射为通量估计。优点是计算速度快；缺点是网络结构高度简化，覆盖代谢网络不完整。
 
-**模型质量预检步骤**：
+**Compass**（Wagner et al., Cell, 2021）：计算每个细胞基因表达谱与理论最优代谢状态的"惩罚得分"（penalty score），间接反映代谢通量潜力，而非直接给出通量值。在免疫细胞代谢研究中应用广泛。
 
-```python
-# 必须执行的预检
-import cobra
-model = cobra.io.load_json_model("Recon3D.json")
-# 检查1：无约束FBA能否生长（biomass reaction不为零）
-# 检查2：memote质量报告
-# 检查3：blocked reactions数量（FVA筛掉永远为零的反应）
-```
+**共同局限——转录-代谢间接推断的根本性问题**：上述方法共享一个根本假设：基因表达量是酶活性的可靠代理，酶活性又是通量的可靠代理。然而，大量研究表明这条链路存在系统性不确定性：
 
-### 1.3 单细胞数据处理工具链
+1. **转录后调控**：mRNA水平与蛋白质水平的相关性在单细胞层面通常低于 $r = 0.4$（Liu et al., Cell, 2016），翻译效率、蛋白质降解速率、翻译后修饰均影响酶的实际活性。
 
-完整工具链（按处理顺序）：
+2. **酶活性与通量的非线性关系**：许多代谢通路处于饱和或接近饱和状态，酶活性变化并不线性转化为通量变化；别构调节机制（如ATP/ADP比值对磷酸果糖激酶的调控）使基因表达完全无法预测酶活性状态。
 
-**层次1：原始成像数据处理**
-- `SpaceM`（原作者工具）：细胞分割 + 离子图像提取
-- `METASPACE`平台：代谢物注释（直接用已注释数据则跳过）
-- `pyImagingMSpec` / `ims-transform`：如需从原始.imzML处理
+3. **代谢物级别的反馈**：代谢通量直接受底物/产物浓度影响（质量作用定律），而底物/产物浓度本身就是本研究直接测量的目标。转录组无法提供这一信息，而代谢物测量天然包含这一信息。
 
-**层次2：单细胞代谢物矩阵处理**
-- `anndata` + `scanpy`：存储和基础处理
-- `squidpy`：空间代谢组分析（如需空间邻域分析）
-- `harmonypy` / `scvi-tools`：批次校正（如多批次数据）
+4. **单细胞噪声放大**：scRNA-seq在单细胞层面存在严重的dropout问题（大量基因因测序深度不足而被记录为零），通过一条充满噪声的链路推断通量，累积误差难以量化。
 
-**层次3：统计和FBA接口**
-- `scipy.stats`：斯皮尔曼相关、Mann-Whitney U检验
-- `numpy` / `pandas`：矩阵运算
-- `statsmodels`：多重检验校正（FDR BH）
-
-**层次4：可视化**
-- `matplotlib` + `seaborn`：标准统计图
-- `escher`：代谢通路通量可视化（嵌入文章图）
-- `scanpy.pl`：单细胞相关可视化
-
-### 1.4 METAFlux复现方案
-
-METAFlux（Zheng et al., Nature Communications 2023）使用Elastic Net回归将scRNA-seq表达量映射到FBA通量约束。
-
-复现步骤：
-
-**步骤1：环境搭建**
-```
-# METAFlux是R包
-# R >= 4.2, Bioconductor 3.16
-install.packages("METAFlux")
-# 依赖：COBRA（R版）, glmnet, Seurat
-```
-
-**步骤2：数据准备**
-- 需要与HT SpaceM同一细胞系的scRNA-seq数据
-- 用基因表达量（非代谢物）做输入
-- 用Human-GEM或Recon3D作为代谢网络
-
-**步骤3：运行流程**
-```r
-library(METAFlux)
-# input: normalized scRNA-seq count matrix (cells × genes)
-# output: flux matrix (cells × reactions)
-flux_result <- metaflux(scRNA_matrix, model="Recon3D")
-```
-
-**步骤4：提取可比较输出**
-- 从METAFlux的通量矩阵提取与本方法相同的核心通路反应
-- 转换为通量方向（sign），用于与bulk验证数据比较
-
-**关键注意**：METAFlux输出的是每个细胞的通量值，需聚合为细胞群体均值或分组均值，才能与bulk数据比较。
+相比之下，直接测量代谢物强度并以此约束通量，从根本上绕过了转录-翻译-酶活-通量这一不确定链路，利用代谢物本身携带的热力学信息约束反应方向，在理论逻辑上更为直接和严密。
 
 ---
 
-## 2. 数据获取详细方案
+## 二、科学问题
 
-### 2.1 HT SpaceM数据
+本研究围绕三个核心科学问题展开：
 
-**文章**：Rappez et al., "HT-SpaceM enables high-throughput single-cell metabolomics in tissue microarrays", Cell 2025（或同年预印本）
+**问题1**：MALDI相对强度能否直接约束FBA通量方向？
 
-**需要确认的信息**（以下基于已知信息，需验证）：
+MALDI测量的代谢物相对强度不是绝对浓度，无法直接代入tFBA的热力学公式。但在两种细胞状态（如处理 vs 对照）之间，代谢物强度的相对变化方向是否仍然携带足够的热力学约束信息，使得通量方向预测成为可能？这是本研究的方法论核心，需要通过与bulk验证数据的对比来回答。
 
-**主要查找路径（按优先级）**：
+**问题2**：代谢物直接约束是否优于转录组间接推断？
 
-路径1 — EMBL-EBI PRIDE/METASPACE：
-- METASPACE是MALDI成像数据的主要公共库
-- 访问：https://metaspace2020.eu
-- 搜索关键词："HT SpaceM" 或 "high-throughput SpaceM" 或 "Rappez 2025"
-- METASPACE提供直接下载注释后的.csv（含代谢物、m/z、细胞ID、强度）
+与METAFlux（转录组路线）相比，在通量方向预测准确率这一量化指标上，直接代谢物约束是否能够实现统计显著的超越？这是本研究的核心假说，需要在相同网络、相同评估框架下进行公平比较。
 
-路径2 — GEO（如有scRNA-seq配套数据）：
-- 访问：https://www.ncbi.nlm.nih.gov/geo/
-- 搜索："HT SpaceM" / "spatial metabolomics single cell"
-- 预期格式：.h5ad 或 count matrix
+**问题3**：单细胞代谢异质性是否揭示bulk方法遗漏的生物学信息？
 
-路径3 — Zenodo（计算数据集常用）：
-- 访问：https://zenodo.org
-- 搜索："HT SpaceM" 或 doi引用
-
-路径4 — 文章Data Availability Statement：
-- 直接从Cell文章全文获取确切链接
-- 访问：https://doi.org/10.1016/j.cell.2025.xxxxx（需查实际DOI）
-
-路径5 — 联系作者：
-- 如数据未公开，直接邮件Rappez/Alexandrov实验室
-- EMBL Heidelberg，Alexandrov组，通常2周内回复
-
-**预期数据格式**：
-
-METASPACE下载的典型格式：
-```
-cell_id | metabolite_name | mz | intensity | x_coord | y_coord | cell_type
-```
-或.h5ad格式（anndata对象）：
-```python
-adata.X        # cells × metabolites intensity matrix
-adata.obs      # cell metadata (type, condition, plate)
-adata.var      # metabolite metadata (mz, formula, adduct)
-adata.obsm["spatial"]  # XY坐标
-```
-
-**140,000+细胞，~100代谢物**：
-- 矩阵大小约 140,000 × 100，稀疏，大多数细胞只检测到部分代谢物
-- 文件大小预估：h5ad约200-500MB，csv约2-5GB
-
-**预处理步骤**：
-
-步骤1：细胞分割（如从原始数据）
-- SpaceM内置细胞分割（基于荧光图像 + MALDI离子图像）
-- 若下载的是已分割数据，此步骤跳过
-- 工具：`SpaceM` Python包（https://github.com/LewisLabUCSD/SpaceM）
-
-步骤2：代谢物鉴定
-- METASPACE已完成代谢物注释（基于数据库匹配）
-- 需要筛选FDR < 0.2的注释结果（METASPACE默认阈值）
-- 关键：保留有HMDB/ChEBI ID的代谢物，用于后续mapping到Recon3D
-
-步骤3：强度归一化
-- 方案A（推荐）：TIC归一化（total ion count），每个细胞的代谢物强度除以该细胞所有检测到的离子总量
-- 方案B：基于参考代谢物的归一化（如果有稳定内标）
-- 方案C：log1p变换 + 中位数归一化（类似scRNA-seq处理）
-- 注意：TIC归一化假设细胞总代谢含量相同，这个假设需要在Discussion中讨论
-
-步骤4：批次效应校正（如数据来自多个实验）
-- 视具体数据结构决定，参考HT SpaceM文章的处理方式
-
-步骤5：细胞筛选
-- 去除检测到代谢物数<10的低质量细胞
-- 去除离群细胞（Mahalanobis距离>3σ）
-
-### 2.2 73个LC-MS/MS验证代谢物
-
-**来源**：HT SpaceM原文的Supplementary数据
-- 73个代谢物是文章作者已用LC-MS/MS批量验证的子集
-- 格式预期：Supplementary Table，包含代谢物名称、HMDB ID、验证相关性等
-- 这73个代谢物是POC的核心，其HMDB/ChEBI ID用于mapping到Recon3D
-
-### 2.3 Recon3D模型下载
-
-**官方来源**：
-- BiGG数据库：https://bigg.ucsd.edu/models/Recon3D
-- 下载格式：JSON（推荐，COBRApy直接读取）、SBML（.xml）、MAT
-- 直接链接：http://bigg.ucsd.edu/static/models/Recon3D.json
-
-**备用：Human-GEM**
-- GitHub：https://github.com/SysBioChalmers/Human-GEM
-- 下载最新release：https://github.com/SysBioChalmers/Human-GEM/releases
-- 格式：.xml（SBML）
-
-**模型基本参数**（Recon3D）：
-- 反应数：13,543
-- 代谢物数：5,835（含隔室）
-- 基因数：3,288
-- 通路数：629
-
-### 2.4 Bulk验证数据
-
-**首选方案：使用同文章（HT SpaceM Cell 2025）的配套bulk数据**
-
-HT SpaceM文章通常包含：
-- LC-MS/MS测量的细胞群体平均代谢物水平
-- 不同处理条件下的bulk代谢组数据
-
-具体获取：检查文章Data Availability和Supplementary，以及PRIDE数据库（LC-MS数据）
-
-**次选方案：外部bulk代谢组数据（同细胞系）**
-
-如果HT SpaceM使用HeLa细胞（常见）：
-- HMDB代谢组数据库：https://hmdb.ca（HeLa参考浓度）
-- Metabolomics Workbench：https://www.metabolomicsworkbench.org
-- 搜索"HeLa glycolysis inhibition" 或 "HeLa 2-DG treatment"
-
-关于"糖酵解抑制实验"的bulk数据：
-- 经典实验：2-脱氧葡萄糖（2-DG）处理抑制糖酵解
-- 预期通量变化：糖酵解通量下降，线粒体代偿性上升
-- 文献验证：Jang et al. Science 2018（U-13C葡萄糖示踪），可用于方向验证
-
-### 2.5 METAFlux所需scRNA-seq数据
-
-**问题**：METAFlux需要scRNA-seq，但HT SpaceM是代谢组学数据，两者不能直接配对。
-
-**方案A（推荐）：公开HeLa scRNA-seq**
-- 10x Genomics公开HeLa数据：https://www.10xgenomics.com/datasets
-- GEO搜索"HeLa single cell RNA-seq"
-- 推荐数据集：GSE146771（HeLa scRNA-seq，已发表）
-
-**方案B：伪bulk方案**
-- 将scRNA-seq数据聚合为伪bulk，再用METAFlux处理
-- 这是公平比较的标准做法
-
-**方案C：直接使用METAFlux论文附带的演示数据**
-- 但细胞系可能不同，需注意在论文中说明
-
-**数据可获得性评估汇总**：
-
-| 数据 | 可获得性 | 难度 | 备注 |
-|------|---------|------|------|
-| HT SpaceM .h5ad | 高 | 低 | METASPACE/Zenodo/作者 |
-| 73个LC-MS验证 | 高 | 低 | 文章Supplementary |
-| Recon3D模型 | 高 | 低 | BiGG直接下载 |
-| Bulk代谢组验证 | 中 | 中 | 需从文章或外部获取 |
-| HeLa scRNA-seq | 高 | 低 | GEO公开数据充足 |
+在HT-SpaceM 140,000+细胞的数据集中，将本方法应用于单细胞层面，是否能发现细胞亚群之间存在统计显著的通量分布差异？这些差异是否对应已知的代谢表型（如糖酵解依赖型 vs OXPHOS依赖型细胞）？这是本研究独特的生物学价值——所有现有的bulk方法原理上无法回答此问题。
 
 ---
 
-## 3. 需要编写的全部脚本清单
+## 三、研究意义
 
-### 模块0：环境配置（1-2天）
-```
-00_setup/
-  00_install_deps.sh          # conda环境创建，所有依赖安装
-  01_test_imports.py          # 验证所有import正常
-  02_download_data.py         # 自动下载所有数据集（含URL）
-```
+**直接意义**：本研究将建立从"单细胞MALDI代谢测量"直接通向"代谢通量预测"的计算路径，消除转录-代谢转换链路中累积的不确定性。对于代谢异质性强烈的癌症微环境、免疫细胞激活等生物学场景，这一路径有望提供更高精度的通量推断。
 
-### 模块1：数据预处理（M1 Week 1-2）
-```
-01_preprocessing/
-  01_load_spacem_data.py      # 加载.h5ad或csv，标准化为anndata格式
-  02_metabolite_qc.py         # 细胞过滤，代谢物过滤（检测率>10%）
-  03_intensity_normalization.py  # TIC归一化 + log1p变换
-  04_batch_correction.py      # 如有多批次：harmonypy校正
-  05_cell_type_annotation.py  # 利用空间信息或已有标注
-  06_export_clean_matrix.py   # 输出标准矩阵：clean_adata.h5ad
-```
+**方法论意义**：提出RDC（相对方向约束）框架，证明在缺乏绝对浓度的条件下，相对强度差值仍然可以提供有意义的热力学约束。这一理论贡献可推广至其他代谢测量模态（如质谱成像、空间代谢组学）与FBA的整合。
 
-### 模块2：代谢物→Recon3D映射（M1 Week 2-3）
-```
-02_mapping/
-  01_load_recon3d.py          # 加载Recon3D，基础质检（biomass flux）
-  02_metabolite_mapping.py    # HMDB/ChEBI ID → Recon3D代谢物ID
-  03_unmapped_analysis.py     # 分析未能mapping的代谢物（诊断用）
-  04_subnetwork_extraction.py # 提取核心碳代谢子网络（见第4节）
-  05_mapping_report.py        # 输出覆盖率报告：多少个代谢物在网络中
-```
+**技术意义**：随着MALDI成像技术进步，未来单细胞可检测代谢物数量有望从目前约100种扩展至数百种；本研究建立的框架具备直接受益于这一技术进步的扩展性，是面向未来的方法布局。
 
-### 模块3：约束算法核心（M2-M3）
-```
-03_core_algorithm/
-  01_relative_to_direction.py  # 相对强度→通量方向约束（核心公式，见第4节）
-  02_constraint_builder.py     # 将方向约束写入COBRApy模型
-  03_fva_runner.py             # 对每个细胞（或细胞群）运行FVA
-  04_flux_direction_extractor.py  # 从FVA结果提取通量方向
-  05_population_aggregator.py  # 单细胞→群体水平聚合
-  06_batch_fva.py              # 批量运行（多条件、多细胞群）
-```
-
-### 模块4：METAFlux基线（M2，并行）
-```
-04_baseline/
-  01_prepare_rnaseq_input.R   # 准备scRNA-seq输入格式
-  02_run_metaflux.R           # 运行METAFlux
-  03_extract_metaflux_flux.R  # 提取通量方向
-  04_metaflux_to_python.py    # R结果导入Python（csv中转）
-```
-
-### 模块5：验证框架（M3-M4）
-```
-05_validation/
-  01_load_bulk_data.py         # 加载bulk验证数据
-  02_bulk_flux_direction.py    # 从bulk代谢组推导参考通量方向
-  03_correlation_analysis.py   # 计算预测vs验证的斯皮尔曼相关
-  04_pathway_comparison.py     # 通路级别对比（本方法 vs METAFlux vs 无约束）
-  05_go_nogo_evaluator.py      # M6 Go/No-Go自动评估脚本
-```
-
-### 模块6：敏感性分析（M4）
-```
-06_sensitivity/
-  01_threshold_sensitivity.py  # 约束阈值参数扫描
-  02_subnetwork_sensitivity.py # 不同子网络选择对结果的影响
-  03_normalization_sensitivity.py  # 不同归一化方案对比
-  04_bootstrap_analysis.py     # Bootstrap置信区间
-```
-
-### 模块7：可视化（M5-M6）
-```
-07_visualization/
-  01_fig1_concept_diagram.py   # 方法概念图（矢量图输出）
-  02_fig2_mapping_coverage.py  # 代谢物映射覆盖率分析图
-  03_fig3_flux_prediction.py   # 通量预测vs验证散点图
-  04_fig4_pathway_comparison.py  # 通路级别对比图（本方法 vs 基线）
-  05_fig5_single_cell_heterogeneity.py  # 单细胞异质性展示
-  06_escher_maps.py            # Escher代谢通路通量可视化
-  07_si_figures.py             # 所有SI图
-```
-
-### 模块8：流水线集成（M5）
-```
-08_pipeline/
-  Snakemake/                  # 或Nextflow
-    Snakefile                 # 全流水线DAG定义
-    config.yaml               # 参数配置文件
-    envs/
-      scmfc.yaml              # conda环境定义
-  run_poc.sh                  # 一键运行POC实验
-  run_full.sh                 # 一键运行全流水线
-```
-
-### 模块9：测试（贯穿全程）
-```
-09_tests/
-  test_mapping.py             # 代谢物mapping单元测试
-  test_constraint_builder.py  # 约束构建正确性测试
-  test_fva_runner.py          # FVA数值测试（已知答案验证）
-  test_correlation.py         # 统计方法测试
-  integration_test.py         # 端到端小数据集测试
-```
+**数据资产意义**：HT-SpaceM提供了迄今规模最大的单细胞代谢组学公开数据集（140,000+细胞），本研究将系统性挖掘这一数据集的计算潜力，产生的分析框架将为后续利用该数据集的研究提供基础工具。
 
 ---
 
-## 4. 独创算法设计
+## 四、创新点
 
-### 4.1 降级版通量方向约束：完整数学框架
+### 4.1 RDC框架：理论推导与合理性论证
 
-**标准tFBA的要求**（本文无法满足）：
+**从tFBA到RDC的降级路径**
 
-tFBA（Thermodynamic FBA，Henry et al. 2007）要求：
-- 每个代谢物的绝对浓度 c_i（单位：mM）
-- 计算吉布斯自由能变化：ΔG'_r = ΔG'°_r + RT·Σ(ν_i·ln(c_i))
-- 约束：每个自发反应的ΔG'_r < 0
+tFBA的热力学约束要求每个反应满足：
 
-**降级方案：相对方向约束（Relative Direction Constraint，RDC）**
+$$\Delta G'_r = \Delta G'^{\circ}_r + RT \sum_i \nu_i \ln(c_i) < 0$$
 
-核心思想：即使没有绝对浓度，我们仍然可以通过比较两种条件（处理 vs 控制）下相对浓度的变化方向，推断通量变化的方向。
+考虑两种细胞状态（条件A和条件B）的对比。对同一反应，两个状态下的热力学约束分别为：
 
-**数学框架**：
+$$\Delta G'^{(A)}_r = \Delta G'^{\circ}_r + RT \sum_i \nu_i \ln(c^{(A)}_i)$$
 
-设代谢物 i 在条件A和条件B下的MALDI强度分别为：
+$$\Delta G'^{(B)}_r = \Delta G'^{\circ}_r + RT \sum_i \nu_i \ln(c^{(B)}_i)$$
 
-```
-I_i^A, I_i^B  (相对强度，单位任意)
-```
+两式相减，标准自由能项消去：
 
-定义相对变化：
-```
-Δr_i = (I_i^B - I_i^A) / I_i^A
-```
+$$\Delta\Delta G'_r = \Delta G'^{(B)}_r - \Delta G'^{(A)}_r = RT \sum_i \nu_i \ln\!\left(\frac{c^{(B)}_i}{c^{(A)}_i}\right) = RT \sum_i \nu_i \cdot \Delta\ln(c_i)$$
 
-对于反应 r，其产物集合为 P_r，底物集合为 S_r。
+当条件B相对条件A的浓度变化较小时，$\Delta\ln(c_i) \approx \Delta r_i$（其中 $\Delta r_i$ 为相对变化量）。因此，$\Delta\Delta G'_r$ 的符号由 $\sum_i \nu_i \cdot \Delta r_i$ 的符号决定。
 
-定义**代谢物约束分数**（Metabolite Constraint Score，MCS）：
-```
-MCS_r = Σ_{i∈P_r, i∈M} w_i · Δr_i - Σ_{j∈S_r, j∈M} w_j · Δr_j
-```
+**关键推论**：若一个反应在条件A下正向进行（$\Delta G'^{(A)}_r < 0$），且 $\Delta\Delta G'_r > 0$（即代谢物变化使热力学驱动力减弱），则反应在条件B下发生逆向的热力学可能性增大；反之亦然。无需知道 $c_i$ 的绝对值，仅凭相对变化 $\Delta r_i$ 即可约束通量方向的变化趋势。
+
+**从浓度变化到MALDI强度变化**：在相同实验条件下，同一代谢物的MALDI强度 $I_i$ 与胞内浓度 $c_i$ 之间存在单调正相关关系（尽管非线性）。因此，$\text{sign}(\Delta I_i) = \text{sign}(\Delta c_i)$，即强度增减方向与浓度增减方向一致。这是将MALDI相对强度代入上述热力学框架的关键桥梁假设，也是RDC框架成立的核心前提之一。
+
+**理论局限的诚实声明**：RDC框架是tFBA的一阶近似，其精度取决于：（1）$\Delta r_i$ 确实较小；（2）MALDI强度与胞内浓度之间存在单调对应关系（可能被基质效应、细胞大小变化等破坏）。这些局限性将在Discussion中明确讨论，并在敏感性分析中量化其影响。
+
+### 4.2 代谢物约束分数（MCS）的定义
+
+**MCS（Metabolite Constraint Score）**是将RDC框架操作化为可计算量的核心定义。
+
+对于代谢网络中的反应 $r$，其产物集合为 $P_r$，底物集合为 $S_r$，化学计量系数为 $\nu_{r,i}$，则：
+
+$$\text{MCS}_r = \sum_{i \in P_r \cap M} w_i \cdot \Delta r_i - \sum_{j \in S_r \cap M} w_j \cdot \Delta r_j = \sum_{i \in M} \nu_{r,i} \cdot w_i \cdot \Delta r_i$$
 
 其中：
-- M 是被测量到的代谢物集合（73个代谢物的子集）
-- w_i 是权重（默认=1；可按测量置信度加权）
+- $M$ 是被MALDI实际测量到的代谢物集合（73个验证代谢物的子集，取决于mapping成功率）
+- $\Delta r_i$ 是代谢物 $i$ 在条件B相对条件A的对数倍变（log fold change）
+- $w_i$ 是权重因子，默认为1，可依据测量置信度（如检测率、变异系数）调整
 
-**通量方向约束规则**：
-```
-if MCS_r > θ_pos:  约束 v_r ≥ 0  (正向通量)
-if MCS_r < θ_neg:  约束 v_r ≤ 0  (逆向通量或零)
-if θ_neg ≤ MCS_r ≤ θ_pos:  不施加约束 (不确定)
-```
+MCS 在数学上等同于 $\frac{\Delta\Delta G'_r}{RT}$ 的一阶近似，具有明确的热力学物理含义。
 
-其中阈值 θ_pos > 0, θ_neg < 0 是关键超参数（见第7节）。
+**与tFBA的精确数学关系**：当所有参与代谢物均被测量（$M = $ 全部代谢物）且 $w_i = 1$ 时，MCS $_r$ 退化为 $\frac{\Delta\Delta G'_r}{RT}$，即完整tFBA约束的差分形式。RDC框架是tFBA在"部分代谢物可测、仅有相对强度"条件下的最大化利用。
 
-**与tFBA的关系**：
+### 4.3 双阈值方案的必要性
 
-tFBA的热力学约束等价于：
-```
-ΔG'_r = ΔG'°_r + RT·Σ_i ν_i·ln(c_i) < 0
-```
+标准tFBA的约束是硬约束：$\Delta G'_r < 0$ 严格成立，否则反应不可行。然而，在MALDI数据中，由于检测噪声、基质效应、细胞间自然变异等因素，MCS $_r$ 的数值精度有限。对于MCS 值接近零的反应，强制施加方向约束反而可能引入错误。
 
-在两种条件比较时，如果忽略ΔG'°项（在相同温度和细胞类型下相同），变化量为：
-```
-ΔΔG'_r ≈ RT·Σ_i ν_i·Δln(c_i) ≈ RT·Σ_i ν_i·Δr_i （当Δr_i较小时）
-```
+因此，本研究提出双阈值方案：
 
-因此MCS_r实际上是ΔΔG'_r的一阶近似（去掉了RT和标准自由能项）。
+$$\text{if } \text{MCS}_r > \theta_+：\text{约束} v_r \geq 0 \text{（正向通量）}$$
 
-**本文独创声明**：
-- 借鉴自tFBA：热力学约束的基本框架，Gibbs自由能与浓度的关系
-- 本文独创：将绝对浓度要求降级为相对强度差值；MCS的定义；双阈值方案；将该框架应用于MALDI单细胞数据
+$$\text{if } \text{MCS}_r < \theta_-：\text{约束} v_r \leq 0 \text{（逆向通量或零）}$$
 
-### 4.2 从相对强度推导通量方向约束：具体公式
+$$\text{if } \theta_- \leq \text{MCS}_r \leq \theta_+：\text{不施加约束（方向不确定）}$$
 
-**输入**：
-- `X[c, m]`：细胞 c 的代谢物 m 的MALDI强度（TIC归一化后）
-- 细胞分组：条件A（控制）和条件B（处理），每组N个细胞
+其中 $\theta_+ > 0$，$\theta_- < 0$ 是关键超参数，需要通过参数敏感性分析确定稳健范围（默认值：$\theta_+ = 0.3$，$\theta_- = -0.3$，基于对数倍变尺度）。
 
-**步骤1：计算群体水平相对变化**
+**为什么双阈值是必要的**：
+- 死区（$[\theta_-, \theta_+]$）扮演信噪分离器的角色：信号弱的反应不施加约束，避免噪声驱动的伪约束。
+- 死区宽度控制精度-覆盖率权衡：阈值绝对值越大，有约束的反应越少（覆盖率低）但每个约束越可靠（精度高）；反之亦然。
+- 这一设计使得方法在代谢物coverage有限的情况下保持保守性（宁可不约束，不约束错误）。
 
-```python
-# 对每个代谢物计算中位数（对离群值鲁棒）
-median_A = np.median(X[group_A, :], axis=0)  # shape: (n_metabolites,)
-median_B = np.median(X[group_B, :], axis=0)
+**覆盖率权重的额外保护**：对于参与代谢物中被测量比例低于最低覆盖率阈值（默认30%）的反应，MCS 计算本身存在较大偏差，无论MCS 值大小均不施加约束。这一设计防止了因测量代谢物稀少而导致的系统性偏差。
 
-# 相对变化（log fold change，更稳定）
-log_fc = np.log2(median_B + epsilon) - np.log2(median_A + epsilon)
-# epsilon = 1e-6 防止log(0)
-```
+### 4.4 本研究的独创性边界
 
-**步骤2：代谢物→反应映射**
+**借鉴自现有理论**：tFBA热力学约束框架（Henry et al., 2007）；FVA通量变异性分析（Mahadevan & Schilling, 2003）；GEM代谢物约束的一般思路（Opdam et al., Cell Systems, 2017）。
 
-```python
-# S矩阵：反应×代谢物的化学计量矩阵（从Recon3D提取）
-# 对于每个反应r，可测量的代谢物子集 M_r
-# MCS_r = Σ_i ν_{r,i} · log_fc_i (仅对i∈M_r求和)
-
-S_measured = S[:, measured_metabolites]  # 子化学计量矩阵
-MCS = S_measured @ log_fc               # shape: (n_reactions,)
-```
-
-**步骤3：计算覆盖率权重**
-
-```python
-# 每个反应的覆盖率 = 被测量到的代谢物数 / 总参与代谢物数
-coverage = np.sum(S_measured != 0, axis=1) / np.sum(S != 0, axis=1)
-# 覆盖率<0.3的反应不施加约束（参数可调）
-reliable_reactions = coverage >= min_coverage_threshold  # 默认0.3
-```
-
-**步骤4：施加约束**
-
-```python
-for r_idx, reaction in enumerate(model.reactions):
-    if not reliable_reactions[r_idx]:
-        continue
-    mcs = MCS[r_idx]
-    if mcs > theta_pos:
-        reaction.lower_bound = max(reaction.lower_bound, 0)
-    elif mcs < theta_neg:
-        reaction.upper_bound = min(reaction.upper_bound, 0)
-    # 否则：不约束
-```
-
-### 4.3 73个代谢物到Recon3D 4000+节点的映射策略
-
-**覆盖率问题量化**：
-
-全网络覆盖率：73 / 4000 ≈ 1.8%（过低，不适合约束全网络）
-
-中央碳代谢子网络覆盖率（估算）：
-- 糖酵解：10个关键代谢物（葡萄糖、G6P、F6P、FBP、DHAP、G3P、3PG、2PG、PEP、丙酮酸）→ 73个中至少含6-8个 → 覆盖率60-80%
-- TCA循环：8个关键代谢物 → 73个中含5-7个 → 覆盖率60-80%
-
-**Mapping策略（三级匹配）**：
-
-第一级：直接ID匹配
-```python
-# HMDB ID → Recon3D代谢物ID
-hmdb_to_recon = load_mapping_table("hmdb_recon3d_mapping.csv")
-# 来源：Recon3D官方注释文件（BiGG database提供）
-direct_mapped = [m for m in metabolites_73 if m.hmdb in hmdb_to_recon]
-```
-
-第二级：名称模糊匹配（对未匹配的）
-```python
-from rapidfuzz import fuzz
-# 代谢物常用名→Recon3D代谢物名
-# 手动审核相似度>0.85的候选
-```
-
-第三级：化学式匹配（对名称匹配失败的）
-```python
-# 从PubChem获取分子式，与Recon3D分子式精确匹配
-# 注意：同一分子式可能对应多个异构体，需人工确认
-```
-
-**预期mapping结果**：
-- 直接匹配：约50-60个（68-82%）
-- 名称/化学式匹配：约5-10个
-- 无法匹配：约5-15个（通常是MALDI特异性脂质或未鉴定代谢物）
-
-**未匹配代谢物处理**：
-- 不施加约束（安全做法，宁可少约束不约束错误）
-- 在Methods中报告最终mapping率
-
-### 4.4 中央碳代谢子网络：具体选择
-
-**子网络选择标准**：
-1. 有充足的代谢物被73个LC-MS验证代谢物覆盖（>50%代谢物可测）
-2. 在细胞处理实验中有明确的方向性改变（实验可检测）
-3. 在Recon3D中有良好的注释和GPR关联
-
-**具体选择5条核心通路**：
-
-通路1：糖酵解/糖异生（Recon3D通路ID：glycolysis_gluconeogenesis）
-- 关键代谢物：葡萄糖、葡萄糖-6-磷酸、果糖-6-磷酸、磷酸烯醇丙酮酸、丙酮酸
-- 反应数：约20个（筛选后约12个可约束）
-- 预期在2-DG处理中方向性变化明显
-
-通路2：TCA循环（citric_acid_cycle）
-- 关键代谢物：柠檬酸、异柠檬酸、α-酮戊二酸、琥珀酸、富马酸、苹果酸
-- 反应数：约15个
-- 这些代谢物在LC-MS/MS中检测稳定
-
-通路3：氧化磷酸化上游（oxidative_phosphorylation）
-- 仅选NADH/NAD⁺比值相关的代谢物约束
-- 约5-8个反应
-
-通路4：谷氨酸/谷氨酰胺代谢（glutamate_metabolism + glutamine_metabolism）
-- 关键代谢物：谷氨酸、谷氨酰胺、天冬氨酸
-- 在癌细胞代谢重编程研究中极重要
-
-通路5：核苷酸代谢（purine_metabolism）
-- ATP/ADP/AMP是重要代谢状态指标
-- 如果73个代谢物中包含这些，可加入
-
-**子网络提取代码逻辑**：
-```python
-# 从Recon3D提取子网络
-target_pathways = [
-    "glycolysis", "gluconeogenesis", "citric_acid_cycle",
-    "pyruvate_metabolism", "glutamate_metabolism", "glutamine_metabolism"
-]
-subnetwork_reactions = []
-for rxn in model.reactions:
-    if any(p in rxn.subsystem.lower() for p in target_pathways):
-        subnetwork_reactions.append(rxn.id)
-# 预期：约150-200个反应
-submodel = model.copy()
-reactions_to_remove = [r for r in submodel.reactions if r.id not in subnetwork_reactions]
-submodel.remove_reactions(reactions_to_remove, remove_orphans=True)
-```
-
-### 4.5 与METAFlux公平比较框架
-
-**核心挑战**：本方法输入是代谢物强度，METAFlux输入是基因表达量，两者不可直接比较。
-
-**公平比较设计**：
-
-**共同输出空间**：
-- 两种方法都预测同一套反应（子网络中约150个反应）的通量方向（+1/0/-1）
-- 两种方法都用同一个Recon3D子网络（确保可比较性）
-- 两种方法都聚合到细胞群体水平再与bulk比较
-
-**共同评估标准**：
-```python
-# 对每个反应r，定义：
-# predicted_direction[r] ∈ {+1, 0, -1}（本方法或METAFlux预测）
-# reference_direction[r] ∈ {+1, -1}（来自bulk数据）
-
-# 精确度计算（排除预测为0的反应）
-accuracy = sum(pred == ref for pred, ref in zip(predicted, reference)
-               if pred != 0) / sum(pred != 0 for pred in predicted)
-
-# 覆盖率计算（有预测的反应比例）
-coverage = sum(pred != 0 for pred in predicted) / len(predicted)
-
-# 综合指标：F1-like score
-# precision = accuracy
-# recall = coverage  
-# F1 = 2 * precision * recall / (precision + recall)
-```
-
-**通路级别比较（Go/No-Go关键指标）**：
-```python
-# 对每条通路计算通路内的平均预测准确度
-pathway_scores = {}
-for pathway in target_pathways:
-    rxns = get_pathway_reactions(pathway)
-    pathway_scores[pathway] = compute_accuracy(rxns)
-
-# Go条件：≥3条通路中，本方法准确度 > METAFlux准确度
-better_pathways = sum(
-    pathway_scores_ours[p] > pathway_scores_metaflux[p]
-    for p in target_pathways
-)
-```
-
-**METAFlux输入数据的处理**：
-- 使用同一细胞系（HeLa）的公开scRNA-seq数据
-- 相同的处理条件（如有配对数据）
-- 在论文中明确说明：两种方法的输入来自不同测量模态，比较的是方向预测能力
-
-### 4.6 理论归属声明
-
-**借鉴自现有理论**：
-- tFBA（Henry et al. 2007, Biophysical Journal）：热力学约束FBA的基本框架
-- FVA（Mahadevan & Schilling, 2003）：通量变异性分析方法
-- METAFlux（Zheng et al. 2023）：单细胞FBA的整体思路
-- GEM-based metabolomics integration（Opdam et al., Cell Systems 2017）：代谢物约束COBRA模型
-
-**本文独创**：
-1. 将tFBA的绝对浓度要求降级为相对强度差值（RDC框架）
-2. MCS（代谢物约束分数）的定义及双阈值方案
-3. MALDI相对强度→FBA约束的完整计算管道
-4. 在HT SpaceM 14万单细胞数据上的应用
-5. 单细胞代谢物直接约束（区别于所有现有方法的转录组间接推断）
+**本研究独创**：
+1. 将tFBA的绝对浓度要求降级为相对强度差值的RDC框架及其数学推导
+2. MCS（代谢物约束分数）的定义、其与 $\Delta\Delta G'_r$ 的数学关系，以及双阈值方案
+3. 将该框架应用于MALDI单细胞数据，建立完整的计算管道
+4. 以HT-SpaceM 140,000+单细胞数据验证直接代谢物约束优于转录组间接推断
 
 ---
 
-## 5. 实验设计
+## 五、实验设计
 
-### 5.1 POC实验具体步骤
+### 5.1 数据来源
 
-**实验1：基础通量方向预测**（M2-M3，核心POC）
+**核心数据集**：Rappez et al.（HT-SpaceM, Cell, 2025）。该数据集包含 140,000+ 单细胞的MALDI代谢组学测量（约100种代谢物，其中73种经LC-MS/MS独立验证），涵盖多种处理条件（药物扰动实验，预期包含糖酵解抑制条件）。数据通过METASPACE平台或文章Data Availability获取。
 
-步骤1：从HT SpaceM数据中选择两种条件的细胞群
-- 条件A：正常培养HeLa（对照）
-- 条件B：处理后HeLa（处理类型依文章而定，如2-DG、oligomycin等）
-- 每组选取N≥500个细胞（保证统计稳定性）
+**代谢网络模型**：Recon3D（Brunk et al., Nature Biotechnology, 2018；BIGG ID: Recon3D），共13,543个反应，5,835个代谢物（含亚细胞隔室定位），3,288个基因。备用：Human-GEM 1.18.0（Yang et al., Science Signaling, 2020），提供更完整的基因-反应-蛋白质关联（GPR），用于与scRNA-seq方法的对比分析。
 
-步骤2：计算73个代谢物的log fold change（条件B vs 条件A）
+**FBA工具框架**：COBRApy 0.29.x，结合FVA进行通量范围计算；Gurobi学术版作为线性规划后端（较默认GLPK加速约10–50倍）。
 
-步骤3：映射到Recon3D子网络，计算MCS
+**METAFlux基线数据**：同细胞系（HeLa）的公开scRNA-seq数据（10x Genomics公开数据集或GEO数据库），用于运行METAFlux、生成对照通量预测。
 
-步骤4：施加通量方向约束，运行FVA
+**bulk验证参考数据**：HT-SpaceM文章配套的LC-MS/MS 群体代谢组数据；或糖酵解抑制条件下的文献通量数据（Jang et al., Science, 2018，U-13C葡萄糖示踪实验）。
 
-步骤5：提取预测的通量方向向量
+### 5.2 子网络聚焦策略
 
-步骤6：从bulk验证数据获取参考通量方向
+73种MALDI检测代谢物在Recon3D全网络（5,835个代谢物节点）中的覆盖率仅约1.8%，不适合约束全网络。因此，POC阶段聚焦于代谢物覆盖率高、生物学意义明确、药物处理响应可预期的中央碳代谢子网络，具体包括：
 
-步骤7：计算斯皮尔曼相关 r
+- **糖酵解/糖异生**：关键代谢物（葡萄糖、G6P、F6P、PEP、丙酮酸等）在73种代谢物中的预期覆盖率 60–80%
+- **TCA循环**：关键代谢物（柠檬酸、异柠檬酸、α-酮戊二酸、琥珀酸、富马酸、苹果酸等）预期覆盖率 60–80%
+- **谷氨酸/谷氨酰胺代谢**：谷氨酸、谷氨酰胺、天冬氨酸，在癌细胞代谢研究中地位重要
+- **丙酮酸代谢**：连接糖酵解与TCA的核心节点
+- **氧化磷酸化上游**（仅限NADH/NAD⁺相关节点）
 
-**实验2：METAFlux基线建立**（M2-M3，并行）
+子网络预计包含 150–200 个反应，代谢物-反应匹配通过三级策略实现：直接HMDB/ChEBI ID匹配（预期60–70%）→ 名称模糊匹配（经人工审核）→ 分子式匹配（处理异构体时人工确认）。最终未能mapping的代谢物不施加约束（保守策略）。
 
-同上，但使用HeLa scRNA-seq数据运行METAFlux，获得相同处理条件下的通量预测
+### 5.3 比较实验设计
 
-**实验3：无约束FBA对照**（M2，1天）
+**三臂设计**：
+- **臂1（本方法）**：MALDI代谢物强度 → RDC框架 → MCS约束 → FVA → 通量方向向量
+- **臂2（METAFlux基线）**：HeLa scRNA-seq → METAFlux → 通量方向向量
+- **臂3（零模型）**：无代谢物/转录组约束 → 标准FVA → 通量方向向量（最差基线）
 
-不施加任何代谢物约束，仅运行标准FVA，作为"最差基线"
+**共同输出空间**：三臂均预测相同子网络中约150个反应的通量方向（+1正向 / 0不确定 / -1逆向），均使用Recon3D相同子模型，均聚合至细胞群体水平后与bulk参考比较，确保可比较性。
 
-**实验4：单细胞异质性分析**（M4，POC扩展）
+**处理条件选择**：优先使用HT-SpaceM文章中的糖酵解抑制条件（如2-脱氧葡萄糖 2-DG处理）。2-DG处理的预期通量变化方向有文献明确支撑，代谢物变化可预期（糖酵解中间体↓，TCA中间体↑，谷氨酰胺消耗↑），适合作为POC的方向性验证场景。每组选取N≥500个细胞以保证统计稳定性。
 
-- 分析单个细胞之间的通量预测差异
-- 展示单细胞代谢异质性（这是文章的独特卖点）
-- 与传统bulk方法对比
+**评估指标**：
+- 主要指标：通量方向预测与bulk参考的斯皮尔曼相关系数 $r$（对象：子网络所有有参考方向的反应）
+- 通路级别准确度：各通路内方向预测准确率（正确预测方向的反应数 / 有预测的反应数）
+- 覆盖率：有明确方向预测（非零）的反应比例
+- 综合指标：精确率（accuracy）与覆盖率（recall）的调和平均（F1 score类似计算）
 
-### 5.2 变量设计
+**统计方法**：斯皮尔曼相关（非参数，对离群值鲁棒）；Wilcoxon符号秩检验（比较两种方法在相同通路上的准确度差异）；Bootstrap（n=1,000）计算相关系数的95%置信区间；Bonferroni校正用于多通路比较的多重检验控制。
 
-**自变量（3水平）**：
-1. 代谢物约束（本文方法，RDC）
-2. 转录组约束（METAFlux基线）
-3. 无约束（FVA，null模型）
+### 5.4 单细胞异质性分析
 
-**因变量（主要）**：
-- 斯皮尔曼相关 r（预测通量方向 vs bulk参考）
-- 通路级别准确度（每条通路内的方向预测准确率）
+在群体级比较验证通过后（M4），将方法扩展至单细胞层面：对每个单细胞独立施加RDC约束并运行FVA，获得140,000+单细胞的通量方向矩阵。分析目标：
 
-**因变量（次要）**：
-- 预测覆盖率（有明确方向预测的反应比例）
-- F1 score（综合精确度和覆盖率）
+- 量化单细胞之间的通量异质性（跨细胞通量方向分布的entropy或标准差）
+- 识别代谢亚群（基于通量方向的无监督聚类）
+- 验证代谢亚群是否对应细胞形态、位置或已知细胞状态标志物
+- 与bulk预测进行直接对比，量化bulk方法因平均化而损失的信息量
 
-**控制变量**：
-- 相同的代谢网络模型（Recon3D子网络）
-- 相同的细胞系（HeLa）
-- 相同的FVA参数（fraction_of_optimum = 0.9）
+### 5.5 Go/No-Go量化标准
 
-### 5.3 HeLa糖酵解抑制实验验证方案
+**M6评估时的Go/No-Go决策矩阵**：
 
-**实验设置**：
-- 处理：2-脱氧葡萄糖（2-DG，10mM）处理HeLa 6小时（经典糖酵解抑制）
-- 或：HT SpaceM文章已有的处理条件（如drug perturbation实验）
+| 指标 | 强Go（支持NatMethods升级） | 弱Go（支持AC投稿） | No-Go（方法不可行） |
+|------|--------------------------|-------------------|---------------------|
+| 斯皮尔曼相关 $r$ | > 0.6，p < 0.01 | 0.5–0.6，p < 0.05 | < 0.5 或 p > 0.05 |
+| 优于METAFlux的通路数 | ≥ 4/5条 | ≥ 3/5条 | < 3条 |
+| 整体方向预测准确率 | > 70% | 60–70% | < 60% |
+| 单细胞代谢异质性发现 | 发现显著代谢亚群 | 异质性趋势可见 | 无可辨别异质性 |
 
-**预期代谢物变化**（bulk参考方向）：
-- 葡萄糖：细胞内↑（摄取减少）
-- 葡萄糖-6-磷酸：↓（2-DG竞争）
-- 丙酮酸：↓（糖酵解减少）
-- 乳酸：↓（糖酵解减少）
-- TCA中间体（柠檬酸等）：↑（替代燃料供应）
-- 谷氨酸/谷氨酰胺：↑摄取
-
-**预期通量变化方向（参考方向向量）**：
-
-| 反应 | 预期方向 | 依据 |
-|------|---------|------|
-| 己糖激酶 | ↓ | 2-DG竞争性抑制 |
-| 磷酸果糖激酶 | ↓ | 级联效应 |
-| 丙酮酸激酶 | ↓ | 级联效应 |
-| 乳酸脱氢酶 | ↓ | 丙酮酸减少 |
-| 柠檬酸合酶 | ↑ | 补偿性TCA上升 |
-| 谷氨酸脱氢酶 | ↑ | 谷氨酸补偿 |
-
-**bulk验证数据获取**：
-- 如HT SpaceM文章未提供2-DG实验，使用文献数据（Jang et al. Science 2018提供了U-13C示踪flux数据）
-- 或：进行配套湿实验（M4-M5，低成本验证：LC-MS/MS测量处理后HeLa细胞代谢物，外包给代谢组学平台，约3-5万RMB）
-
-### 5.4 Go/No-Go量化标准
-
-**Go条件（M6评估）**：
-
-条件1（必须满足）：
-```
-r > 0.5 (斯皮尔曼相关)
-p < 0.05 (统计显著)
-```
-
-条件2（必须满足）：
-```
-≥3条通路（共5条）中，本方法准确度 > METAFlux准确度
-```
-
-条件3（加分项，用于升NatMethods的论证）：
-```
-在单细胞异质性展示中，发现bulk方法遗漏的代谢异质性
-```
-
-**No-Go判断**：
-- 若r < 0.3：方法不可行，停止
-- 若0.3 ≤ r ≤ 0.5：方法弱可行，但不支持发表，需重新审视数据质量或算法
-- 若通路优势 < 2条：与METAFlux无显著区别，需重新设计
-
-**统计检验方案**：
-- Wilcoxon符号秩检验：比较本方法 vs METAFlux在相同通路上的准确度
-- Bootstrap（n=1000）：所有相关系数的置信区间
-- Bonferroni校正：多通路比较的多重检验
+**No-Go触发后的分支处置**：
+- $r$ < 0.3：方法理论不可行，终止scMFC方向
+- 0.3 ≤ $r$ < 0.5：方法弱可行，重新审视数据质量（是否归一化问题、mapping错误、子网络选择问题），参数优化后重新评估
+- 通路优势 < 2条：与METAFlux无区分，考虑重新定位为"单细胞代谢组学分析框架"（不声称优于转录组方法）
 
 ---
 
-## 6. 论文结构与图表详细规划
+## 六、脚本与工具产出清单
 
-### 6.1 AC版本（初版）：主文图表
+以下列出本研究将产生的脚本和工具，仅描述功能和规模，不包含代码实现。
 
-**Figure 1：概念与数据概述**（两个panel）
+### 模块0：环境与数据获取（预计 3 个文件，~100行总计）
+- 环境配置脚本：创建conda环境，安装COBRApy、anndata、scanpy及相关依赖
+- 数据下载脚本：从METASPACE、BiGG、GEO等来源自动下载HT-SpaceM数据、Recon3D模型、HeLa scRNA-seq数据
+- 导入验证脚本：验证所有依赖正确安装，Recon3D模型可正常加载并运行biomass flux
 
-Panel A（概念图，手绘/BioRender风格）：
-- 左：传统方法路径（细胞→scRNA-seq→基因表达→间接推断→通量）
-- 右：本方法路径（细胞→MALDI→代谢物强度→直接约束→通量）
-- 突出显示：本方法去除了"转录-代谢"这一不确定步骤
-- 颜色：红色为传统路径，蓝色为本方法
+### 模块1：数据预处理（预计 5 个脚本，~600行总计）
+- SpaceM数据加载器：将.h5ad或csv格式的HT-SpaceM原始数据标准化为anndata格式
+- 代谢物质控脚本：按细胞检测率过滤低质量细胞和低丰度代谢物，报告过滤统计
+- 强度归一化脚本：实现TIC归一化和log1p变换，支持多种归一化方案对比
+- 批次校正脚本（条件性）：如数据跨多批次则运行harmonypy批次校正
+- 细胞分组导出脚本：将处理组和对照组细胞分别导出为标准矩阵，供后续分析使用
 
-Panel B（数据可视化）：
-- HT SpaceM数据集概览：140,000个细胞的UMAP，颜色代表细胞类型
-- 73个代谢物的检测率热图（代谢物×细胞类型）
-- 子图：代谢物mapping到Recon3D子网络的覆盖率桑基图
+### 模块2：代谢物-网络映射（预计 4 个脚本，~500行总计）
+- Recon3D加载与质检脚本：加载JSON格式模型，运行memote质量报告，检测阻塞反应
+- 三级mapping脚本：依次执行HMDB/ChEBI ID直接匹配、名称模糊匹配、分子式匹配，输出mapping结果表
+- 子网络提取脚本：根据目标通路名称提取Recon3D子模型，确保biomass flux不为零
+- mapping覆盖率报告生成器：计算并可视化73个代谢物在子网络中的覆盖率，按通路分类展示
 
-**Figure 2：方法论证与核心结果**（三个panel）
+### 模块3：RDC核心算法（预计 5 个脚本，~800行总计）
+- log fold change计算器：从细胞分组矩阵计算每种代谢物的对数倍变，支持中位数/均值聚合
+- MCS计算器：通过化学计量矩阵乘以log fold change向量，计算所有反应的MCS得分
+- 约束施加器：根据双阈值方案和覆盖率阈值，将方向约束写入COBRApy模型对象
+- FVA批量运行器：对多个条件/细胞群并行运行FVA，提取通量上下界，推断方向（+1/0/-1）
+- 单细胞FVA运行器：对140,000+单细胞逐一或批量运行FVA，输出单细胞通量方向矩阵（内存优化版本）
 
-Panel A（mapping结果）：
-- 73个代谢物到Recon3D的mapping结果
-- 中央碳代谢子网络的覆盖率可视化（escher地图，将测量到的代谢物高亮）
+### 模块4：METAFlux基线（预计 4 个脚本，~400行总计）
+- scRNA-seq数据准备脚本（R）：将HeLa scRNA-seq数据整理为METAFlux所需的输入格式
+- METAFlux运行脚本（R）：调用METAFlux包，在标准化参数下运行，输出通量矩阵
+- 通量方向提取脚本（R）：从METAFlux通量矩阵提取方向向量（+1/0/-1），聚合至群体水平
+- R到Python桥接脚本：将R输出的通量结果转换为Python可读格式，供统一评估框架使用
+
+### 模块5：验证与评估框架（预计 5 个脚本，~600行总计）
+- bulk参考方向构建脚本：从LC-MS/MS bulk数据或文献通量数据构建参考通量方向向量
+- 相关性分析脚本：计算三臂预测与参考的斯皮尔曼相关，输出相关矩阵和p值
+- 通路级别准确度计算脚本：按通路分组计算方向预测准确率、覆盖率、F1 score
+- Go/No-Go自动评估脚本：读入所有统计结果，按预设标准自动判断Go/No-Go并生成决策报告
+- METAFlux公平比较脚本：在统一框架下进行Wilcoxon检验、Bootstrap置信区间计算和多重检验校正
+
+### 模块6：敏感性分析（预计 4 个脚本，~500行总计）
+- 阈值参数扫描脚本：系统扫描 $\theta_+$ 和 $\theta_-$ 的参数空间，展示结果稳定性
+- 子网络选择敏感性脚本：对比不同子网络范围（仅糖酵解、糖酵解+TCA、全中央碳代谢）的预测差异
+- 归一化方案比较脚本：对比TIC归一化、log-median归一化等方案对最终结果的影响
+- Bootstrap分析脚本：对所有关键指标计算1,000次Bootstrap置信区间
+
+### 模块7：可视化（预计 7 个脚本，~800行总计）
+- Figure 1概念图脚本：方法对比示意图（本方法直接路径 vs 转录组间接路径），矢量图输出
+- Figure 2a代谢物mapping图脚本：Escher代谢通路地图，高亮已测量代谢物和mapping结果
+- Figure 2b核心验证散点图脚本：预测通量分数 vs 参考方向，三臂并排，含相关系数和显著性标注
+- Figure 2c通路比较柱状图脚本：三臂在5条通路上的方向预测准确度，含显著性标注
+- Figure 3单细胞异质性图脚本：单细胞水平通量方向热图、亚群violin图、与bulk对比
+- Supplementary图脚本：数据质控图、mapping详细报告图、统计完整结果图
+- Escher通路通量可视化脚本：生成用于文章插图的代谢通路通量方向嵌入图
+
+### 模块8：流水线集成（预计 3 个文件，~200行总计）
+- Snakefile（或Nextflow流程文件）：定义从原始数据到最终图表的完整DAG，参数化配置
+- 配置文件（YAML）：所有可调参数的中央存储，包含数据路径、算法参数、可视化参数
+- 一键运行脚本：POC版和完整版分别一键执行，含进度报告和错误处理
+
+### 模块9：软件包（NatMethods升级阶段）
+- Python包（scmfc）：将核心算法（MCS计算、约束施加、FVA接口）打包为可pip安装的Python库，目标规模约2,000行核心代码
+- Tutorial Jupyter Notebook：复现文章Figure 2的完整教程，附测试数据集
+- 单元测试套件：覆盖mapping、约束施加、FVA运行、统计分析等关键函数，目标覆盖率 > 80%
+
+---
+
+## 七、论文结构与图表规划
+
+### 7.1 AC版本（概念验证阶段，主要图表）
+
+**Figure 1：方法原理与数据概述**（双panel）
+
+Panel A（概念对比图，BioRender风格）：
+左侧展示现有转录组路线（细胞 → scRNA-seq → 基因表达 → 酶活性推断 → 间接约束 → 通量），标注每个推断步骤的不确定性来源；右侧展示本研究路线（细胞 → MALDI成像 → 代谢物强度 → RDC直接约束 → FVA → 通量方向），突出消除了转录-代谢转换链路。关键视觉设计：用红色警示符号标注转录路线的不确定步骤，用蓝色简洁路径展示代谢物直接约束路线。
+
+Panel B（数据集与覆盖率可视化）：
+HT-SpaceM 140,000+细胞的UMAP总览（按细胞类型/处理条件着色）；73种代谢物检测率热图（代谢物 × 细胞类型）；73种代谢物到Recon3D子网络的mapping覆盖率桑基图（展示三级mapping策略的各阶段贡献）。
+
+**Figure 2：方法验证与核心结果**（三panel）
+
+Panel A（mapping覆盖率）：
+Escher代谢通路地图，在中央碳代谢网络背景上高亮已成功mapping的代谢物（颜色编码：覆盖率高/中/低），展示方法在糖酵解和TCA循环的高覆盖率；统计摘要：映射成功的代谢物数量和百分比，按通路分类。
 
 Panel B（核心验证散点图）：
-- X轴：参考通量方向（来自bulk数据）
-- Y轴：预测通量方向分数（MCS）
-- 每个点为一个反应
-- 颜色：所属通路
-- 显示：r=0.xx, p=0.xxx
-- 三个子图：本方法 / METAFlux / 无约束（并列比较）
+X轴：来自bulk参考的通量方向（标准化为-1至+1连续量）；Y轴：MCS约束得分；每个点代表子网络中一个反应，颜色区分所属通路。三个子图并列：本方法（RDC）/ METAFlux / 无约束（零模型）。每图标注斯皮尔曼相关系数和p值。这是文章的核心量化图，展示方法优越性。
 
 Panel C（通路级别比较柱状图）：
-- X轴：5条核心通路
-- Y轴：通量方向预测准确度（0-1）
-- 三组柱子：本方法（蓝）/ METAFlux（橙）/ 无约束（灰）
-- 显著性标注（*，**，***）
+X轴：5条核心通路（糖酵解、TCA循环、谷氨酸代谢、丙酮酸代谢、氧化磷酸化上游）；Y轴：通量方向预测准确率（0–1）；三组并列柱状图（RDC蓝色 / METAFlux橙色 / 零模型灰色）；加星号标注统计显著性（*p<0.05，**p<0.01，***p<0.001）。
 
-**Figure 3：单细胞异质性（独特卖点）**（两个panel）
+**Figure 3：单细胞代谢异质性**（双panel）
 
-Panel A：
-- 单细胞水平的通量方向热图（细胞×反应子集）
-- 展示单细胞之间的代谢异质性
-- 按细胞亚群分组排序
+Panel A（单细胞通量方向热图）：
+行为单个细胞（按亚群分组排序），列为子网络中关键反应子集；颜色编码通量方向（+1蓝 / 0白 / -1红）；展示细胞间通量方向的异质性，使用双聚类排序凸显亚群结构。
 
-Panel B：
-- 选取一个代谢通路（如糖酵解）
-- 展示不同细胞亚群的通量分布（violin图）
-- 与bulk预测对比（bulk无法区分亚群）
+Panel B（亚群通量分布与bulk对比）：
+选取糖酵解作为展示通路，展示各细胞亚群的代谢通量分布（violin图）；与bulk平均预测（水平虚线）对比；统计显著性标注（亚群间Wilcoxon检验）；文字说明bulk方法因平均化而遮蔽的异质性信息。
 
-**Figure 4（如有）：外部验证或方法鲁棒性**
+**Figure 4（条件性）：外部验证**
 
-如有第二个数据集或第二种细胞系，展示方法泛化性。
+如有第二数据集（非HeLa细胞系或第二种实验条件），在此展示方法的泛化性。
 
-### 6.2 NatMethods升级版：额外内容
+### 7.2 NatMethods升级版额外内容
 
-升级NatMethods需要增加的内容：
+**额外Figure E1：方法参数鲁棒性**（完整Figure）：$\theta_+$/$\theta_-$ 阈值参数扫描的热图（x：$\theta_+$，y：$\theta_-$，颜色：准确率）；不同子网络选择的结果比较；不同归一化方案的敏感性；Bootstrap 95%置信区间展示。
 
-**额外图表1：方法参数鲁棒性分析**（1个完整Figure）
-- 阈值θ扫描：展示结果对参数不敏感
-- 不同子网络选择：展示核心结果稳定
-- 不同归一化方法：TIC vs log-median归一化的比较
-- Bootstrap置信区间
+**额外Figure E2：全方法比较**：本研究 vs METAFlux vs scFEA vs Compass vs 零模型的统一评估框架比较；标准化雷达图（精确率、覆盖率、计算效率、数据类型要求）。
 
-**额外图表2：与其余4个竞争方法的全面比较**（1个Figure）
-- 不仅vs METAFlux，还vs scFEA、Compass、scFBA（如有公开实现）
-- 统一评估框架，公平比较
+**额外Figure E3：第二数据集验证**：使用第二个MALDI单细胞数据集（Alexandrov组其他数据集或另一细胞系），重现主要结论，验证方法泛化性。
 
-**额外图表3：方法在第二个数据集的验证**
-- 寻找第二个MALDI单细胞数据集（Alexandrov组或其他）
-- 或：换细胞系（非HeLa）验证
+**额外内容：计算性能分析**：FVA运行时间 vs 细胞数量的伸缩性曲线（100 / 1,000 / 10,000 / 140,000细胞）；内存使用峰值；并行化策略和Gurobi vs GLPK性能对比；与METAFlux计算开销的量化比较。
 
-**额外内容：软件包**
-- NatMethods要求方法有可复用的软件实现
-- 需要打包为Python包（PyPI发布）
-- README + tutorial notebook（复现Figure 2的完整代码）
-- GitHub CI/CD + 单元测试
+### 7.3 Supplementary Information规划
 
-**额外内容：计算复杂度分析**
-- 每个细胞的FVA运行时间
-- 1000个细胞 / 10000个细胞 / 140000个细胞的耗时
-- 与METAFlux的计算开销比较
-- 并行化策略说明
+**SI Figure S1**：数据质量控制（QC前后分布对比、TIC归一化效果验证、批次效应评估）
 
-### 6.3 Supplementary Information规划
+**SI Figure S2**：73种代谢物完整mapping状态报告（三级策略各阶段匹配数量、未匹配代谢物列表及原因分析）
 
-SI Figure 1：数据质量控制
-- 细胞过滤前后的代谢物检测分布
-- TIC归一化效果验证
-- 批次效应（如有）
+**SI Figure S3**：Recon3D子网络验证（无约束FVA基线、子网络biomass flux合理性检验）
 
-SI Figure 2：代谢物mapping详细报告
-- 所有73个代谢物的mapping状态（匹配/未匹配/部分匹配）
-- 三级matching策略各自匹配的数量
-- 未匹配代谢物列表及原因分析
+**SI Figure S4**：METAFlux复现验证（在原文数据上复现发表结果，证明基线实现正确）
 
-SI Figure 3：Recon3D子网络验证
-- 无约束FVA结果（验证子网络是否合理）
-- Biomass flux与细胞生长率的相关性（如有实验数据）
+**SI Figure S5**：完整统计结果（所有通路的精确率/覆盖率/F1数据、Bootstrap置信区间完整图）
 
-SI Figure 4：METAFlux复现验证
-- 在原文数据上复现METAFlux的发表结果（证明基线实现正确）
+**SI Figure S6**：计算性能详细分析
 
-SI Figure 5：统计方法详细结果
-- 所有通路的完整精确度/覆盖率/F1数据
-- Bootstrap置信区间的完整图
+**SI Table S1**：73种代谢物完整mapping表（代谢物名、HMDB ID、Recon3D ID、mapping状态）
 
-SI Figure 6：计算复杂度
-- FVA运行时间 vs 细胞数量
-- 内存使用
+**SI Table S2**：子网络所有反应及预测方向表
 
-SI Table 1：73个代谢物的完整mapping表
-SI Table 2：子网络所有反应列表及预测方向
-SI Table 3：通路级别完整统计结果
+**SI Table S3**：通路级别完整统计结果表
 
-### 6.4 Discussion论证框架
+---
+
+## 八、Discussion论证框架
 
 **段落1：方法创新性定位**
-- 明确区分"直接测量"vs"间接推断"
-- 强调消除了转录-代谢转换这一不确定步骤的意义
-- 与5个竞争方法的清晰区分
 
-**段落2：降级策略的科学合理性**
-- 解释为何不需要绝对浓度仍能获得有意义的约束
-- 与tFBA理论的数学联系
-- 双阈值方案的鲁棒性
+在"转录组间接推断"与"代谢物直接约束"之间的选择，不仅是技术路线的差异，更是对"什么信息最直接反映代谢状态"这一根本问题的不同回答。现有方法沿用了scRNA-seq的技术惯性，但代谢通量的决定因素（底物/产物浓度、热力学驱动力）恰恰是代谢物测量直接反映的，而非基因表达间接反映的。本研究方法在逻辑链路上更短、不确定性来源更少，是对单细胞代谢通量推断问题的更本质的回应。
 
-**段落3：局限性（必须诚实）**
-- 73个代谢物覆盖率有限（坦诚，然后论证足以覆盖中央碳代谢）
-- MALDI空间分辨率限制（与LC-MS比较）
-- 处理条件依赖性（需要配对数据）
-- 目前只适用于有明确代谢改变的实验条件
+**段落2：RDC框架的科学合理性**
+
+RDC框架不是凭直觉的近似，而是tFBA热力学约束的严格数学降级——当代谢物相对变化较小时，$\Delta\Delta G'_r$ 与MCS之间存在一阶近似关系。实验结果（$r$ 值和通路准确率）验证了这一近似在MALDI测量精度范围内仍然有效。双阈值方案的设计保证了即使近似有误差，系统也倾向于"不约束"而非"约束错误"，体现了在不确定性条件下保守性原则的应用。
+
+**段落3：局限性（诚实声明）**
+
+*代谢物覆盖率有限*：73种代谢物对Recon3D全网络覆盖率约1.8%，本研究仅能约束中央碳代谢子网络（约150个反应），对脂质代谢、氨基酸次级代谢等通路无法提供约束。随着MALDI技术进步（近年研究已展示可检测>200种代谢物的能力），这一局限性预期将逐步缓解。
+
+*MALDI强度不等于绝对浓度*：MALDI信号受基质效应、电离效率、细胞大小等因素影响，相同浓度的代谢物在不同细胞中可能产生不同强度。RDC框架依赖的核心假设是"强度变化方向与浓度变化方向一致"，这一假设在系统性基质效应存在时可能受到破坏。在多细胞类型分析时尤需注意。
+
+*方法依赖条件比较*：RDC框架需要两种细胞状态（处理 vs 对照）之间的相对变化，不能直接应用于无参照条件的单时间点分析。
+
+*计算复杂度*：对140,000个细胞逐一运行FVA在目前计算条件下需要较长时间，实际应用中可能需要降采样或并行化策略。
 
 **段落4：未来方向**
-- 更多代谢物（MALDI技术进步→数百个代谢物）
-- 绝对浓度标准化（如有内标，可尝试真正tFBA）
-- 空间通量异质性分析
-- 与proteomics数据联合约束
+
+- 随MALDI可检测代谢物数量增加，RDC框架可直接扩展至更完整的网络覆盖
+- 如能获得细胞特异性绝对定量数据（如稳定同位素内标），可升级为真正的tFBA约束
+- 空间通量异质性分析：结合细胞空间位置信息，研究代谢通量的空间梯度
+- 多组学联合约束：将代谢物约束与蛋白质组学数据（直接测量酶丰度）联合，进一步提升预测精度
 
 ---
 
-## 7. 关键变量列表
+## 九、时间线
 
-### 7.1 算法参数（需要调参）
+**M1（W1–W4）：数据获取与基础搭建**
+- W1–2：获取HT-SpaceM数据，搭建COBRApy环境，加载并质检Recon3D模型
+- W3：HT-SpaceM数据预处理（QC、TIC归一化、细胞分组）
+- W4：三级代谢物mapping，产出mapping覆盖率报告
 
-| 变量名 | 默认值 | 范围 | 说明 |
-|--------|--------|------|------|
-| `theta_pos` | 0.3 | 0.1-1.0 | 正向约束阈值 |
-| `theta_neg` | -0.3 | -1.0 至 -0.1 | 逆向约束阈值 |
-| `min_coverage` | 0.3 | 0.1-0.6 | 每个反应最低代谢物覆盖率 |
-| `epsilon` | 1e-6 | 固定 | 防止log(0) |
-| `fraction_of_optimum` | 0.9 | 0.8-0.99 | FVA参数 |
-| `min_cells_per_group` | 100 | 50-500 | 每组最少细胞数 |
-| `log_fc_method` | "log2_ratio" | "log2/log/ratio" | fold change计算方式 |
-| `aggregation_method` | "median" | "mean/median/trimmed_mean" | 细胞群体聚合方式 |
+**M2（W5–W8）：算法原型**
+- W5–6：子网络提取、MCS计算器实现、约束施加器实现
+- W7：糖酵解抑制条件的FVA批量运行，获得首批预测通量方向
+- W8：METAFlux基线环境搭建，HeLa scRNA-seq数据获取
 
-### 7.2 子网络选择参数
+**M3（W9–W12）：首次验证**
+- W9–10：bulk验证参考数据整理，构建参考通量方向向量
+- W11：首次计算三臂斯皮尔曼相关（期望获得第一个有意义的量化结果）
+- W12：三臂完整对比，初版Go/No-Go评估
 
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `target_subsystems` | ["glycolysis", "TCA", "glutamate"] | 目标通路名称（匹配Recon3D字段） |
-| `max_reactions_in_subnetwork` | 300 | 子网络最大反应数 |
-| `include_transport_reactions` | True | 是否包含跨膜转运反应 |
-| `compartments` | ["c", "m"] | 包含的细胞隔室（胞质+线粒体） |
+**M4（W13–W16）：迭代优化**
+- W13：双阈值参数扫描，优化 $\theta_+$ 和 $\theta_-$
+- W14：单细胞异质性分析，细胞亚群代谢通量分布
+- W15–16：若 $r$ < 0.5，系统诊断（mapping精度、归一化方案、子网络选择），参数调优
 
-### 7.3 验证参数
+**M5（W17–W20）：整合与写作**
+- W17–18：所有主图和SI图制作，Escher通量可视化
+- W19：Introduction和Methods写作
+- W20：实验室内部预审（组会）
 
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `correlation_method` | "spearman" | 相关性计算方法 |
-| `significance_threshold` | 0.05 | p值显著性阈值 |
-| `go_nogo_r_threshold` | 0.5 | Go/No-Go相关性下限 |
-| `go_nogo_pathway_threshold` | 3 | 必须优于METAFlux的最少通路数 |
-| `bootstrap_n` | 1000 | Bootstrap迭代次数 |
-| `fdr_method` | "BH" | 多重检验校正方法 |
-
-### 7.4 数据处理参数
-
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `min_detection_rate` | 0.1 | 代谢物在细胞中最低检测率 |
-| `min_metabolites_per_cell` | 10 | 每个细胞最少检测到的代谢物数 |
-| `normalization_method` | "TIC" | 归一化方法 |
-| `outlier_threshold` | 3.0 | Mahalanobis距离阈值 |
-| `batch_correction` | False | 是否进行批次校正 |
-
-### 7.5 Go/No-Go评估矩阵
-
-| 指标 | 强Go | 弱Go | No-Go |
-|------|------|------|-------|
-| 斯皮尔曼r | >0.6 | 0.5-0.6 | <0.5 |
-| 优于METAFlux通路数 | ≥4 | 3 | <3 |
-| 整体准确度 | >0.7 | 0.6-0.7 | <0.6 |
-| 单细胞异质性发现 | 有显著差异 | 有弱差异 | 无差异 |
+**M6（W21–W24）：Go/No-Go决策**
+- W21：最终统计分析，Go/No-Go正式评估
+- W22–24：若Go → 完成AC完整稿；评估NatMethods升级路径，制定M7–M18计划
 
 ---
 
-## 8. M1-M6时间线详细分配
+## 十、风险与应对
 
-**M1（前4周）：数据获取与环境搭建**
-- W1-2：下载所有数据，搭建Python/R环境，COBRApy + Recon3D加载验证
-- W3：HT SpaceM数据预处理（QC + 归一化）
-- W4：代谢物→Recon3D mapping（三级策略），产出mapping报告
+**风险1：73种代谢物mapping率过低（< 40%）**
 
-**M2（W5-W8）：算法原型**
-- W5-6：子网络提取 + MCS计算 + 约束施加（脚本01-05 in 模块3）
-- W7：FVA批量运行（HeLa对照条件）
-- W8：METAFlux基线环境搭建 + HeLa scRNA-seq数据获取
+触发条件：三级matching后，在中央碳代谢子网络中可用代谢物 < 30种。
 
-**M3（W9-W12）：首次验证实验**
-- W9-10：获取bulk验证数据，构建参考通量方向向量
-- W11：首次计算r值（期望第一个有意义的数字出现）
-- W12：METAFlux完整运行，首次三方对比
+应对：退守核心子集策略——仅保留糖酵解和TCA循环最核心的15–20种代谢物（这些代谢物预期在LC-MS/MS验证集中全部存在，覆盖率应达 > 60%），调整文章声明范围，从"全中央碳代谢"缩窄为"糖酵解-TCA轴通量约束"。
 
-**M4（W13-W16）：迭代优化**
-- W13：参数敏感性分析，优化theta和coverage阈值
-- W14：单细胞异质性分析
-- W15-16：如果r<0.5，诊断原因（mapping错误？归一化问题？子网络选择？）
+**风险2：HT-SpaceM数据未公开**
 
-**M5（W17-W20）：巩固与可视化**
-- W17-18：所有图表制作
-- W19：方法论文写作（Introduction + Methods）
-- W20：内部预审（实验室组会）
+触发条件：文章发表时数据未上传METASPACE或Zenodo，Data Availability说明"available on reasonable request"。
 
-**M6（W21-W24）：Go/No-Go评估**
-- W21：最终统计分析，Go/No-Go评估
-- W22-24：如Go → 写作完整AC稿 + 决策升NatMethods路径
+应对：M1 W1第一天即发送联系邮件至Alexandrov组（EMBL Heidelberg），说明学术合作目的，通常2周内可获得。同时准备替代数据集（Rappez et al., Nature Methods, 2021的SpaceM原始数据，已完全公开，细胞数更少但足以POC）。
 
----
+**风险3：$r$ 值始终 < 0.3**
 
-## 9. 风险与应对
+触发条件：M3结束后主要指标 $r$ < 0.3，参数优化后仍无改善。
 
-**风险1：73个代谢物mapping率过低（<40%）**
-- 触发条件：直接mapping失败，三级匹配后仍<30个代谢物在子网络中
-- 应对：退守核心代谢物子集（仅使用糖酵解+TCA的15-20个代谢物，但这些覆盖率应>60%）
+应对路径1：检查bulk参考数据质量——若bulk验证数据本身信噪比低，参考方向向量可靠性不足，需更换验证数据源。
 
-**风险2：HT SpaceM数据未公开**
-- 触发条件：文章发表但数据在Data Availability中说"available on reasonable request"
-- 应对：M1 W1立即发送邮件给Alexandrov组，同时准备替代数据集（如Rappez et al. Nature Methods 2021的SpaceM原始数据，已公开）
+应对路径2：退守"通量方向一致性"指标（仅计算符号是否一致，而非连续相关），报告更保守的评估指标。
 
-**风险3：r值始终<0.3**
-- 触发条件：M3结束后r<0.3，且参数优化无效
-- 应对1：检查bulk验证数据质量（参考方向是否可靠？）
-- 应对2：退守"方向一致性"指标而非连续相关（只看符号是否相同）
-- 应对3：如仍失败，考虑重新定位为方法论文（"分析MALDI单细胞代谢组学数据的框架"，不一定要比METAFlux强）
+应对路径3：重新定位研究目标为"单细胞MALDI代谢组学数据分析框架"，不声称通量方向预测优于现有方法，转而聚焦单细胞异质性发现的生物学价值。
 
-**风险4：METAFlux配套scRNA-seq数据与SpaceM不匹配**
-- 触发条件：找不到与HT SpaceM同条件的HeLa scRNA-seq数据
-- 应对：用不同条件的HeLa scRNA-seq，明确说明配对局限性；或退守到跨数据集的通路水平比较
+**风险4：METAFlux配套scRNA-seq数据与HT-SpaceM不匹配**
+
+触发条件：无法找到与HT-SpaceM相同细胞系、相同处理条件的HeLa scRNA-seq公开数据。
+
+应对：使用不同来源的HeLa scRNA-seq（仅保证细胞系相同），在Methods中明确说明两种方法的输入不完全配对，比较对象是"同细胞系不同来源数据的通量方向预测能力"，而非严格配对比较。若审稿人提出异议，这是一个已知局限，可在Supplementary中专门讨论。
