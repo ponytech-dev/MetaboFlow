@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.engine.annot_adapter import AnnotWorkerAdapter
 from app.engine.base import EngineAdapter
 from app.engine.msdial_adapter import MSDIALAdapter
 from app.engine.mzmine_adapter import MZmineAdapter
@@ -23,6 +24,7 @@ class EngineRegistry:
         self.register(MZmineAdapter())
         self.register(PyOpenMSAdapter())
         self.register(MSDIALAdapter())
+        self.register(AnnotWorkerAdapter())
 
     def register(self, adapter: EngineAdapter) -> None:
         self._engines[adapter.engine_name] = adapter

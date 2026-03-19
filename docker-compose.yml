@@ -50,6 +50,7 @@ services:
       METABOFLOW_XCMS_WORKER_URL: http://xcms-worker:8001
       METABOFLOW_STATS_WORKER_URL: http://stats-worker:8002
       METABOFLOW_CHART_SERVICE_URL: http://chart-service:8005
+      METABOFLOW_ANNOT_WORKER_URL: http://annot-worker:8006
       METABOFLOW_CORS_ORIGINS: '["http://localhost:3000"]'
     volumes:
       - ./data:/data
@@ -78,6 +79,7 @@ services:
       METABOFLOW_CELERY_RESULT_BACKEND: redis://redis:6379/1
       METABOFLOW_XCMS_WORKER_URL: http://xcms-worker:8001
       METABOFLOW_STATS_WORKER_URL: http://stats-worker:8002
+      METABOFLOW_ANNOT_WORKER_URL: http://annot-worker:8006
     volumes:
       - ./data:/data
     depends_on:
@@ -117,6 +119,27 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  annot-worker:
+    build:
+      context: ./packages/engines/annot-worker
+      dockerfile: Dockerfile
+    image: metaboflow/annot-worker:0.1.0
+    container_name: metaboflow-annot-worker
+    restart: unless-stopped
+    ports:
+      - "8006:8006"
+    volumes:
+      - ./spectral_libraries:/spectral_libraries:ro
+      - ./data:/data
+    environment:
+      ANNOTWORKER_LIBRARY_DIR: /spectral_libraries
+      ANNOTWORKER_REGISTRY_DB: /spectral_libraries/registry.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   # ── Chart Service ────────────────────────────────────────────────────────
 

@@ -89,9 +89,24 @@ class StatParams(BaseModel):
     fdr_method: str = "BH"
 
 
+class TagFilter(BaseModel):
+    """Multi-label filter for selecting spectral libraries."""
+
+    instrument: list[str] = Field(default_factory=list)
+    organism: list[str] = Field(default_factory=list)
+    compound_class: list[str] = Field(default_factory=list)
+    confidence: list[str] = Field(default_factory=lambda: ["high", "medium", "low"])
+
+
 class AnnotationParams(BaseModel):
+    tag_filter: TagFilter = Field(default_factory=TagFilter)
+    ms1_ppm: float = 5.0
+    ms2_tolerance_da: float = 0.02
+    ms2_min_score: float = 0.7
+    ms2_method: str = "CosineGreedy"
+    run_ms2: bool = True
+    run_ms1: bool = True
     databases: list[str] = Field(default_factory=lambda: ["hmdb", "mona", "massbank"])
-    ms1_ppm: float = 15.0
     rt_tolerance: float = 30.0
 
 

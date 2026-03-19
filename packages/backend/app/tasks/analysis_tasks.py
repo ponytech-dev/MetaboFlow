@@ -8,6 +8,7 @@ import logging
 from app.engine.registry import engine_registry
 from app.models.analysis import AnalysisStatus
 from app.services.analysis_service import _analyses, update_progress
+from app.services.annotation_orchestrator import run_layered_annotation
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,8 @@ def run_analysis_pipeline(self, analysis_id: str) -> dict:
                 _run_peak_detection(analysis_id, config, upload_dir, results_dir)
             elif step_idx == 3:  # Statistical Analysis
                 _run_statistics(analysis_id, config, results_dir)
-            # Other steps: placeholder for now
+            elif step_idx == 4:  # Annotation
+                _run_annotation(analysis_id, config, results_dir)
 
         update_progress(
             analysis_id,
@@ -123,3 +125,38 @@ def _run_statistics(analysis_id: str, config, results_dir: str) -> None:
     data = _analyses.get(analysis_id)
     if data and "n_significant" in result:
         data["n_significant"] = result["n_significant"]
+
+
+def _run_annotation(analysis_id: str, config, results_dir: str) -> None:
+    """Execute metabolite annotation step (Level 2 + Level 3 + Level 4)."""
+    data = _analyses.get(analysis_id)
+    if data is None:
+        return
+
+    # Build feature list from previous steps (would come from MetaboData in production)
+    features = data.get("features", [])
+    ms2_spectra = data.get("ms2_spectra")  # None if no MS2 data
+
+    annotation_params = config.annotation
+
+    result = asyncio.get_event_loop().run_until_complete(
+        run_layered_annotation(
+            features=features,
+            ms2_spectra=ms2_spectra,
+            params=annotation_params,
+            polarity="positive",
+        )
+    )
+
+    summary = result.get("summary", {})
+    if data is not None:
+        data["n_annotated"] = summary.get("n_level2", 0) + summary.get("n_level3", 0)
+        data["annotation_result"] = result
+
+    logger.info(
+        "Annotation for %s: L2=%d, L3=%d, L4=%d",
+        analysis_id,
+        summary.get("n_level2", 0),
+        summary.get("n_level3", 0),
+        summary.get("n_level4", 0),
+    )
