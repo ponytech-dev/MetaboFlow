@@ -169,13 +169,17 @@ def mgf_to_msp(mgf_path: str, msp_path: str) -> int:
                     fout.write(f"Precursor_type: {meta.get('PRECURSOR_TYPE', meta.get('ADDUCT', ''))}\n")
                 if "CHARGE" in meta:
                     fout.write(f"Ion_mode: {'NEGATIVE' if '-' in meta['CHARGE'] else 'POSITIVE'}\n")
-                for key in ["FORMULA", "INCHIKEY", "SMILES", "INCHI", "INSTRUMENT_TYPE",
+
+                # Resolve InChIKey from multiple possible fields
+                inchikey = meta.get("INCHIKEY", "") or meta.get("INCHIAUX", "")
+                if inchikey and inchikey != "N/A":
+                    fout.write(f"InChIKey: {inchikey}\n")
+
+                for key in ["FORMULA", "SMILES", "INCHI", "INSTRUMENT_TYPE",
                             "ORGANISM", "LIBRARYQUALITY", "SPECTRUMID", "SCANS"]:
                     if key in meta:
-                        # Map to MSP field names
                         msp_key = {
                             "FORMULA": "Formula",
-                            "INCHIKEY": "InChIKey",
                             "SMILES": "SMILES",
                             "INCHI": "InChI",
                             "INSTRUMENT_TYPE": "Instrument_type",
@@ -488,6 +492,7 @@ def _load_hmdb_compound_lookup(lib_dir: str) -> dict:
                         "name": row.get("name", ""),
                         "formula": row.get("formula", ""),
                         "exact_mass": row.get("exact_mass", ""),
+                        "inchikey": row.get("inchikey", ""),
                     }
     return lookup
 
@@ -562,6 +567,8 @@ def convert_hmdb_experimental(lib_dir: str) -> dict:
             is_neg = "neg" in ion_mode.lower()
             out_f = neg_f if is_neg else pos_f
 
+            inchikey = cpd.get("inchikey", "")
+
             out_f.write(f"Name: {name}\n")
             if exact_mass:
                 out_f.write(f"ExactMass: {exact_mass}\n")
@@ -569,6 +576,8 @@ def convert_hmdb_experimental(lib_dir: str) -> dict:
                 out_f.write(f"Precursor_type: {adduct_type}\n")
             if formula:
                 out_f.write(f"Formula: {formula}\n")
+            if inchikey:
+                out_f.write(f"InChIKey: {inchikey}\n")
             if hmdb_id:
                 out_f.write(f"DB#: {hmdb_id}\n")
             if instrument:
