@@ -51,6 +51,7 @@ services:
       METABOFLOW_STATS_WORKER_URL: http://stats-worker:8002
       METABOFLOW_CHART_SERVICE_URL: http://chart-service:8005
       METABOFLOW_ANNOT_WORKER_URL: http://annot-worker:8006
+      METABOFLOW_SIRIUS_WORKER_URL: http://sirius-worker:8007
       METABOFLOW_CORS_ORIGINS: '["http://localhost:3000"]'
     volumes:
       - ./data:/data
@@ -80,6 +81,7 @@ services:
       METABOFLOW_XCMS_WORKER_URL: http://xcms-worker:8001
       METABOFLOW_STATS_WORKER_URL: http://stats-worker:8002
       METABOFLOW_ANNOT_WORKER_URL: http://annot-worker:8006
+      METABOFLOW_SIRIUS_WORKER_URL: http://sirius-worker:8007
     volumes:
       - ./data:/data
     depends_on:
@@ -140,6 +142,27 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+  sirius-worker:
+    build:
+      context: ./packages/engines/sirius-worker
+      dockerfile: Dockerfile
+    image: metaboflow/sirius-worker:0.1.0
+    container_name: metaboflow-sirius-worker
+    restart: unless-stopped
+    ports:
+      - "8007:8007"
+    volumes:
+      - ./data:/data
+    environment:
+      SIRIUS_USER: ${SIRIUS_USER:-}
+      SIRIUS_PASSWORD: ${SIRIUS_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ── Chart Service ────────────────────────────────────────────────────────
 

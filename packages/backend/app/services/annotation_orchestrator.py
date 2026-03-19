@@ -11,6 +11,7 @@ from typing import Any
 
 from app.engine.annot_adapter import AnnotWorkerAdapter
 from app.engine.registry import engine_registry
+from app.engine.sirius_adapter import SiriusWorkerAdapter
 from app.models.analysis import AnnotationParams
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,56 @@ async def run_layered_annotation(
             except Exception as e:
                 logger.error(f"Level 2 annotation failed: {e}")
 
+    # ── Level 2.5: SIRIUS/CSI:FingerID structure prediction ──────────────
+    n_sirius = 0
+    if params.run_ms2 and ms2_spectra:
+        sirius_adapter = engine_registry.get("sirius")
+        if sirius_adapter is not None and isinstance(sirius_adapter, SiriusWorkerAdapter):
+            try:
+                is_healthy = await sirius_adapter.health_check()
+                if is_healthy:
+                    # Only predict for features not yet annotated at Level 2
+                    unannotated_ms2 = [
+                        s for s in ms2_spectra
+                        if annotations.get(s["feature_id"], {}).get("msi_level") is None
+                    ]
+                    if unannotated_ms2:
+                        logger.info(f"SIRIUS: predicting structures for {len(unannotated_ms2)} features")
+                        sirius_result = await sirius_adapter.run(
+                            input_path="",
+                            params={
+                                "spectra": unannotated_ms2,
+                                "database": "bio",
+                                "instrument": "orbitrap",
+                            },
+                            output_dir="",
+                        )
+                        for pred in sirius_result.get("predictions", []):
+                            fid = pred["feature_id"]
+                            top = pred.get("top_structure")
+                            if top and fid in annotations:
+                                annotations[fid].update({
+                                    "compound_name": top.get("compound_name"),
+                                    "inchikey": top.get("inchikey"),
+                                    "formula": top.get("molecular_formula"),
+                                    "msi_level": 3,  # SIRIUS = Level 3 (strict MSI)
+                                    "annot_score": top.get("csi_score"),
+                                    "annot_method": "sirius_csifingerid",
+                                    "annot_source": "SIRIUS",
+                                })
+                                n_sirius += 1
+
+                        provenance_steps.append({
+                            "step": "annotation_sirius",
+                            "engine": f"sirius-worker/{sirius_adapter.engine_version}",
+                            "n_predicted": n_sirius,
+                        })
+                        logger.info(f"SIRIUS: {n_sirius} features predicted")
+                else:
+                    logger.info("sirius-worker not available, skipping SIRIUS")
+            except Exception as e:
+                logger.warning(f"SIRIUS prediction failed (non-critical): {e}")
+
     # ── Level 3: MS1 m/z matching (stats-worker) ──────────────────────────
     n_level3 = 0
     if params.run_ms1:
@@ -157,13 +208,14 @@ async def run_layered_annotation(
     summary = {
         "n_features": n_features,
         "n_level2": n_level2,
+        "n_sirius": n_sirius,
         "n_level3": n_level3,
         "n_level4": n_level4,
         "n_unannotated": n_unannotated,
     }
 
     logger.info(
-        f"Annotation summary: L2={n_level2}, L3={n_level3}, "
+        f"Annotation summary: L2={n_level2}, SIRIUS={n_sirius}, L3={n_level3}, "
         f"L4={n_level4}, unannotated={n_unannotated}"
     )
 

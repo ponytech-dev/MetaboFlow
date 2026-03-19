@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     mzmine_worker_url: str = "http://localhost:8003"
     msdial_worker_url: str = "http://localhost:8004"
     annot_worker_url: str = "http://localhost:8006"
+    sirius_worker_url: str = "http://localhost:8007"
 
     model_config = {"env_prefix": "METABOFLOW_"}
 

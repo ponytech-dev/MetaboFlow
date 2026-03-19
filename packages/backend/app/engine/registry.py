@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.engine.annot_adapter import AnnotWorkerAdapter
 from app.engine.base import EngineAdapter
+from app.engine.sirius_adapter import SiriusWorkerAdapter
 from app.engine.msdial_adapter import MSDIALAdapter
 from app.engine.mzmine_adapter import MZmineAdapter
 from app.engine.pyopenms_adapter import PyOpenMSAdapter
@@ -25,6 +26,7 @@ class EngineRegistry:
         self.register(PyOpenMSAdapter())
         self.register(MSDIALAdapter())
         self.register(AnnotWorkerAdapter())
+        self.register(SiriusWorkerAdapter())
 
     def register(self, adapter: EngineAdapter) -> None:
         self._engines[adapter.engine_name] = adapter
