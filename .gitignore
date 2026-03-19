@@ -59,6 +59,12 @@ tests/e2e/data/MTBLS733_mzML_subset/
 tests/e2e/data/*.txt
 tests/e2e/tools/
 tests/e2e/results/
+tests/e2e/results_qe/
+tests/e2e/results_qe_v2/
+
+# Spectral libraries (shared, not part of this repo)
+spectral_libraries
+
 *.CDF
 *.cdf
 *.mzML

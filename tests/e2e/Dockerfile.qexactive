@@ -22,7 +22,7 @@ RUN Rscript -e " \
     if (!requireNamespace('BiocManager', quietly = TRUE)) \
         install.packages('BiocManager'); \
     BiocManager::install(version = '3.20', ask = FALSE, update = FALSE); \
-    BiocManager::install(c('xcms', 'limma', 'MSnbase'), ask = FALSE, update = FALSE); \
+    BiocManager::install(c('xcms', 'limma', 'MSnbase', 'KEGGREST'), ask = FALSE, update = FALSE); \
     install.packages(c( \
         'ggplot2', 'dplyr', 'tidyr', 'pheatmap', 'patchwork', \
         'ggsci', 'scales', \
@@ -38,10 +38,12 @@ WORKDIR /app
 COPY packages/engines/stats-worker/R/config.R /app/R/config.R
 COPY packages/engines/stats-worker/R/differential.R /app/R/differential.R
 COPY packages/engines/stats-worker/R/visualization.R /app/R/visualization.R
+COPY packages/engines/stats-worker/R/annotation_ms1.R /app/R/annotation_ms1.R
+COPY packages/engines/stats-worker/R/pathway_ora.R /app/R/pathway_ora.R
 
 # Copy Q Exactive pipeline script
 COPY tests/e2e/run_e2e_qexactive.R /app/run_e2e_qexactive.R
 
-VOLUME ["/data", "/results"]
+VOLUME ["/data", "/results", "/spectral_libraries"]
 
 CMD ["Rscript", "/app/run_e2e_qexactive.R"]

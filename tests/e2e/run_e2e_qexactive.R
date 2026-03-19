@@ -2,10 +2,10 @@
 ##  MetaboFlow E2E Pipeline — Thermo Q Exactive HF (MTBLS733)
 ##  Dataset: Piper nigrum (black pepper) seeds, Group A vs Group B
 ##  Instrument: Thermo Q Exactive HF, ESI+, 100-1500 m/z, RPLC C18
-##  Peak detection: MatchedFilter (memory-efficient for Docker-constrained environments)
+##  Peak detection: CentWave (industry standard for Orbitrap)
 ##
 ##  Input:  /data/mzML/{SA,SB}*.mzML
-##  Output: /results/ (CSV tables + Nature-quality PDF/TIFF/PNG charts)
+##  Output: /results/ (CSV tables + annotation + pathway + Nature-quality figures)
 ##############################################################################
 
 cat("========== MetaboFlow E2E: Q Exactive HF (MTBLS733) ==========\n")
@@ -25,6 +25,8 @@ suppressPackageStartupMessages({
 
 source("/app/R/config.R")
 source("/app/R/differential.R")
+source("/app/R/annotation_ms1.R")
+source("/app/R/pathway_ora.R")
 
 ## ========================= Config =========================
 DATA_DIR    <- "/data/mzML"
@@ -47,8 +49,8 @@ cat("Sample info:\n")
 print(sample_info[, c("sample_id", "group")])
 cat("\n")
 
-## ========================= Step 1: Peak Detection (MatchedFilter) =========================
-cat("===== Step 1: Peak Detection (xcms MatchedFilter — memory-efficient) =====\n")
+## ========================= Step 1: Peak Detection (CentWave) =========================
+cat("===== Step 1: Peak Detection (xcms CentWave — Orbitrap standard) =====\n")
 t1 <- Sys.time()
 register(SerialParam())
 
@@ -66,16 +68,17 @@ if (rt_range[2] > 900) {
   cat("  Filtered RT to 30-600 seconds to manage memory\n")
 }
 
-# MatchedFilter: binning-based, constant memory regardless of resolution
-# binSize=0.01 preserves high-res Orbitrap mass accuracy
-mfp <- MatchedFilterParam(
-  binSize  = 0.01,
-  fwhm     = 10,
-  snthresh = 10,
-  mzdiff   = 0.01
+# CentWave: continuous wavelet transform, standard for high-resolution data
+# ppm=5 matches Q Exactive HF mass accuracy
+cwp <- CentWaveParam(
+  ppm       = 5,
+  peakwidth = c(5, 30),
+  snthresh  = 10,
+  noise     = 1000,
+  prefilter = c(3, 1000)
 )
-cat("  Running MatchedFilter (binSize=0.01, fwhm=10, snthresh=10)...\n")
-xdata <- findChromPeaks(raw_data, param = mfp)
+cat("  Running CentWave (ppm=5, peakwidth=5-30, snthresh=10)...\n")
+xdata <- findChromPeaks(raw_data, param = cwp)
 gc()  # free peak detection intermediates
 cat("  Chromatographic peaks found:", nrow(chromPeaks(xdata)), "\n")
 
@@ -84,7 +87,7 @@ pdp <- PeakDensityParam(
   sampleGroups = sample_group,
   minFraction  = 0.5,
   bw           = 3,
-  binSize      = 0.01
+  binSize      = 0.025
 )
 xdata <- groupChromPeaks(xdata, param = pdp)
 cat("  Features after grouping:", nrow(featureDefinitions(xdata)), "\n")
@@ -524,8 +527,117 @@ captions <- c(
 )
 writeLines(captions, file.path(RESULTS_DIR, "00_FIGURE_CAPTIONS.txt"))
 
-## ========================= Step 5: Summary =========================
-cat("\n===== Step 5: Summary Report =====\n")
+## ========================= Step 5: Metabolite Annotation =========================
+cat("\n===== Step 5: Metabolite Annotation (Level 3, MS1 m/z matching) =====\n")
+t5 <- Sys.time()
+
+LIB_DIR <- "/spectral_libraries"
+COMPOUND_DB_PATH <- file.path(LIB_DIR, "level3_compounds/combined/level3_compounds.csv")
+ann_df <- data.frame()
+
+if (file.exists(COMPOUND_DB_PATH)) {
+  compound_db <- load_compound_db(COMPOUND_DB_PATH)
+  theo_mz_df <- compute_theoretical_mz(compound_db, polarity = "positive")
+
+  ann_df <- annotate_ms1(
+    feature_mz  = feature_defs[rownames(int_norm), "mzmed"],
+    feature_ids = rownames(int_norm),
+    feature_rt  = feature_defs[rownames(int_norm), "rtmed"],
+    compound_db = compound_db,
+    theo_mz_df  = theo_mz_df,
+    ppm_tol     = 5,
+    max_matches = 3
+  )
+
+  if (nrow(ann_df) > 0) {
+    write.csv(ann_df, file.path(RESULTS_DIR, "04_annotations_all.csv"),
+              row.names = FALSE)
+
+    # Best hit per feature
+    best_ann <- ann_df[order(ann_df$ppm_error), ]
+    best_ann <- best_ann[!duplicated(best_ann$feature_id), ]
+    write.csv(best_ann, file.path(RESULTS_DIR, "04_annotations_best.csv"),
+              row.names = FALSE)
+
+    # Merge annotation into limma results for annotated significant features
+    sig_annotated <- merge(
+      limma_result$significant,
+      best_ann[, c("feature_id", "matched_name", "formula", "adduct",
+                    "ppm_error", "kegg_id", "hmdb_id")],
+      by.x = "row.names", by.y = "feature_id",
+      all.x = TRUE
+    )
+    colnames(sig_annotated)[1] <- "feature_id"
+    write.csv(sig_annotated,
+              file.path(RESULTS_DIR, "04_significant_annotated.csv"),
+              row.names = FALSE)
+
+    ann_summary <- summarize_annotations(ann_df)
+    cat("  Annotated features:", ann_summary$n_matched,
+        "| Unique compounds:", ann_summary$n_unique_compounds, "\n")
+    cat("  With KEGG ID:", ann_summary$n_with_kegg,
+        "| With HMDB ID:", ann_summary$n_with_hmdb, "\n")
+    n_sig_ann <- sum(!is.na(sig_annotated$matched_name))
+    cat("  Significant features with annotation:", n_sig_ann, "of",
+        nrow(sig_annotated), "\n")
+  }
+} else {
+  cat("  Compound database not found at", COMPOUND_DB_PATH, "\n")
+  cat("  Mount spectral_libraries with -v ~/spectral_libraries:/spectral_libraries\n")
+}
+
+t5_end <- Sys.time()
+cat("  Annotation time:", round(difftime(t5_end, t5, units = "secs"), 1), "seconds\n\n")
+
+## ========================= Step 6: Pathway Enrichment =========================
+cat("===== Step 6: Pathway Enrichment (KEGG ORA) =====\n")
+t6 <- Sys.time()
+pathway_df <- data.frame()
+
+# Extract KEGG IDs directly from Level 3 annotation (no API calls needed)
+if (nrow(ann_df) > 0 && requireNamespace("KEGGREST", quietly = TRUE)) {
+  best_ann_all <- ann_df[order(ann_df$ppm_error), ]
+  best_ann_all <- best_ann_all[!duplicated(best_ann_all$feature_id), ]
+  sig_fids <- rownames(limma_result$significant)
+  sig_ann <- best_ann_all[best_ann_all$feature_id %in% sig_fids, ]
+
+  # KEGG IDs come directly from the compound database — no API search needed
+  kegg_ids <- unique(sig_ann$kegg_id[!is.na(sig_ann$kegg_id) & sig_ann$kegg_id != ""])
+  cat("  Significant annotated features:", nrow(sig_ann), "\n")
+  cat("  With KEGG IDs:", length(kegg_ids), "\n")
+
+  if (length(kegg_ids) >= 3) {
+    pathway_df <- run_kegg_ora(kegg_ids, organism = "ko", p_cutoff = 0.05)
+
+    if (nrow(pathway_df) > 0) {
+      write.csv(pathway_df, file.path(RESULTS_DIR, "05_kegg_pathway_ora.csv"),
+                row.names = FALSE)
+
+      sig_pathways <- pathway_df[pathway_df$raw_p < 0.05, ]
+      if (nrow(sig_pathways) > 0) {
+        p_pathway <- plot_pathway_dotplot(sig_pathways, top_n = 20,
+                                          title = "KEGG Pathway Enrichment (ORA)")
+        if (!is.null(p_pathway)) {
+          save_nature(p_pathway, file.path(RESULTS_DIR, "Fig4_pathway"),
+                      width_mm = 140, height_mm = 120)
+          cat("  Figure 4 (pathway) saved\n")
+        }
+      }
+    }
+  } else {
+    cat("  Too few KEGG IDs (<3), skipping pathway ORA\n")
+  }
+} else {
+  if (nrow(ann_df) == 0) cat("  No annotations available, skipping\n")
+  if (!requireNamespace("KEGGREST", quietly = TRUE))
+    cat("  KEGGREST not installed, skipping\n")
+}
+
+t6_end <- Sys.time()
+cat("  Pathway analysis time:", round(difftime(t6_end, t6, units = "secs"), 1), "seconds\n\n")
+
+## ========================= Step 7: Summary =========================
+cat("\n===== Step 7: Summary Report =====\n")
 summary_lines <- c(
   "===============================================",
   "MetaboFlow E2E Pipeline — Q Exactive HF (MTBLS733)",
@@ -560,6 +672,15 @@ summary_lines <- c(
   "  Fig1: Overview (volcano + PCA + MA) — 183mm",
   "  Fig2: Feature detail (violin + bubble + lollipop) — 183mm",
   "  Fig3: Heatmap — 89mm",
+  "",
+  "## Step 5: Metabolite Annotation",
+  paste("  Total annotations:", nrow(ann_df)),
+  paste("  Features annotated:", length(unique(ann_df$feature_id))),
+  paste("  Method: MS1 m/z matching (ppm=10, ESI+ adducts)"),
+  "",
+  "## Step 6: Pathway Enrichment",
+  paste("  KEGG pathways tested:", nrow(pathway_df)),
+  paste("  Significant (p<0.05):", sum(pathway_df$raw_p < 0.05, na.rm = TRUE)),
   "==============================================="
 )
 writeLines(summary_lines, file.path(RESULTS_DIR, "00_E2E_REPORT.txt"))
