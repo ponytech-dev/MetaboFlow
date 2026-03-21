@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from app.engine.registry import engine_registry
 from app.models.analysis import AnalysisStatus
@@ -39,8 +40,6 @@ def run_analysis_pipeline(self, analysis_id: str, config_dict: dict) -> dict:
     config = AnalysisConfig(**config_dict)
     upload_dir = analysis_service.get_upload_dir(analysis_id)
     results_dir = str(Path(upload_dir).parent.parent / "results" / analysis_id) if upload_dir else f"/data/results/{analysis_id}"
-
-    from pathlib import Path
     Path(results_dir).mkdir(parents=True, exist_ok=True)
 
     analysis_service.update_progress(analysis_id, status=AnalysisStatus.RUNNING)
