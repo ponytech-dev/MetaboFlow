@@ -52,7 +52,7 @@ services:
       METABOFLOW_CHART_SERVICE_URL: http://chart-service:8005
       METABOFLOW_ANNOT_WORKER_URL: http://annot-worker:8006
       METABOFLOW_SIRIUS_WORKER_URL: http://sirius-worker:8007
-      METABOFLOW_CORS_ORIGINS: '["http://localhost:3000"]'
+      METABOFLOW_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001"]'
     volumes:
       - ./data:/data
     depends_on:
@@ -71,7 +71,7 @@ services:
       context: ./packages/backend
       dockerfile: Dockerfile
     container_name: metaboflow-celery
-    command: celery -A app.tasks.celery_app worker --loglevel=info
+    command: uv run celery -A app.tasks.celery_app worker --loglevel=info
     restart: unless-stopped
     environment:
       METABOFLOW_DATABASE_URL: postgresql://metaboflow:metaboflow_dev@postgres:5432/metaboflow
@@ -193,7 +193,7 @@ services:
     container_name: metaboflow-frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3001}:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://backend:8000
     depends_on:
