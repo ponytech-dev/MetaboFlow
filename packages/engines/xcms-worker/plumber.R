@@ -296,7 +296,10 @@ function(req) {
     suppressPackageStartupMessages({
       library(MSnbase)
       library(xcms)
+      library(BiocParallel)
     })
+    # Disable fork parallelism — unstable in Docker containers
+    register(SerialParam())
     source("/app/R/feature_deconvolution.R")
     source("/app/R/metabodata_bridge.R")
 
