@@ -96,6 +96,16 @@ interface AnalysisState {
   toggleChartType: (type: string) => void;
   setExportFormat: (format: ExportFormat) => void;
 
+  // Analysis execution state
+  analysisId: string | null;
+  isRunning: boolean;
+  runError: string | null;
+
+  // Actions - Execution
+  setAnalysisId: (id: string | null) => void;
+  setIsRunning: (running: boolean) => void;
+  setRunError: (error: string | null) => void;
+
   // Reset
   reset: () => void;
 }
@@ -139,6 +149,11 @@ export const useAnalysisStore = create<AnalysisState>()(
       // Step 7
       chartTypes: ['Volcano', 'PCA', 'Heatmap'],
       exportFormat: 'PDF',
+
+      // Execution state
+      analysisId: null,
+      isRunning: false,
+      runError: null,
 
       // Navigation actions
       setStep: (step) =>
@@ -211,6 +226,11 @@ export const useAnalysisStore = create<AnalysisState>()(
         })),
       setExportFormat: (exportFormat) => set({ exportFormat }),
 
+      // Execution actions
+      setAnalysisId: (analysisId) => set({ analysisId }),
+      setIsRunning: (isRunning) => set({ isRunning }),
+      setRunError: (runError) => set({ runError }),
+
       // Reset
       reset: () =>
         set({
@@ -233,6 +253,9 @@ export const useAnalysisStore = create<AnalysisState>()(
           sigThreshold: 0.05,
           chartTypes: ['Volcano', 'PCA', 'Heatmap'],
           exportFormat: 'PDF',
+          analysisId: null,
+          isRunning: false,
+          runError: null,
         }),
     }),
     { name: 'MetaboFlow-Analysis' }
