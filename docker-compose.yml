@@ -52,7 +52,7 @@ services:
       METABOFLOW_CHART_SERVICE_URL: http://chart-service:8005
       METABOFLOW_ANNOT_WORKER_URL: http://annot-worker:8006
       METABOFLOW_SIRIUS_WORKER_URL: http://sirius-worker:8007
-      METABOFLOW_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001"]'
+      METABOFLOW_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3005"]'
     volumes:
       - ./data:/data
     depends_on:
@@ -71,7 +71,7 @@ services:
       context: ./packages/backend
       dockerfile: Dockerfile
     container_name: metaboflow-celery
-    command: uv run celery -A app.tasks.celery_app worker --loglevel=info
+    command: uv run celery -A app.tasks.celery_app worker --loglevel=info -I app.tasks.analysis_tasks
     restart: unless-stopped
     environment:
       METABOFLOW_DATABASE_URL: postgresql://metaboflow:metaboflow_dev@postgres:5432/metaboflow
@@ -99,6 +99,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/data
+      - ${HOME}/spectral_libraries:/spectral_libraries:ro
     healthcheck:
       test: ["CMD", "Rscript", "-e", "cat('ok')"]
       interval: 30s
@@ -132,7 +133,7 @@ services:
     ports:
       - "8006:8006"
     volumes:
-      - ./spectral_libraries:/spectral_libraries:ro
+      - ${HOME}/spectral_libraries:/spectral_libraries:ro
       - ./data:/data
     environment:
       ANNOTWORKER_LIBRARY_DIR: /spectral_libraries

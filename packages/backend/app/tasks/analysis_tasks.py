@@ -7,7 +7,7 @@ import logging
 
 from app.engine.registry import engine_registry
 from app.models.analysis import AnalysisStatus
-from app.services.analysis_service import _analyses, update_progress
+from app.services import analysis_service
 from app.services.annotation_orchestrator import run_layered_annotation
 from app.tasks.celery_app import celery_app
 
@@ -25,24 +25,32 @@ STEP_NAMES = [
 
 
 @celery_app.task(bind=True, name="run_analysis_pipeline")
-def run_analysis_pipeline(self, analysis_id: str) -> dict:
+def run_analysis_pipeline(self, analysis_id: str, config_dict: dict) -> dict:
     """Run the full analysis pipeline.
 
     Each step updates progress via the analysis_service.
     """
-    data = _analyses.get(analysis_id)
-    if data is None:
+    from app.models.analysis import AnalysisConfig
+
+    progress = analysis_service.get_progress(analysis_id)
+    if progress is None:
         return {"error": f"Analysis {analysis_id} not found"}
 
-    config = data["config"]
-    results_dir = data["results_dir"]
-    upload_dir = data["upload_dir"]
+    config = AnalysisConfig(**config_dict)
+    upload_dir = analysis_service.get_upload_dir(analysis_id)
+    results_dir = str(Path(upload_dir).parent.parent / "results" / analysis_id) if upload_dir else f"/data/results/{analysis_id}"
 
-    update_progress(analysis_id, status=AnalysisStatus.RUNNING)
+    from pathlib import Path
+    Path(results_dir).mkdir(parents=True, exist_ok=True)
+
+    analysis_service.update_progress(analysis_id, status=AnalysisStatus.RUNNING)
+
+    # Runtime state (not persisted, just for passing data between steps)
+    runtime = {}
 
     try:
         for step_idx, step_name in enumerate(STEP_NAMES):
-            update_progress(
+            analysis_service.update_progress(
                 analysis_id,
                 current_step=step_idx + 1,
                 step_name=step_name,
@@ -51,13 +59,13 @@ def run_analysis_pipeline(self, analysis_id: str) -> dict:
             )
 
             if step_idx == 1:  # Peak Detection
-                _run_peak_detection(analysis_id, config, upload_dir, results_dir)
+                _run_peak_detection(analysis_id, config, upload_dir, results_dir, runtime)
             elif step_idx == 3:  # Statistical Analysis
-                _run_statistics(analysis_id, config, results_dir)
+                _run_statistics(analysis_id, config, results_dir, runtime)
             elif step_idx == 4:  # Annotation
-                _run_annotation(analysis_id, config, results_dir)
+                _run_annotation(analysis_id, config, results_dir, runtime)
 
-        update_progress(
+        analysis_service.update_progress(
             analysis_id,
             status=AnalysisStatus.COMPLETED,
             current_step=7,
@@ -69,7 +77,7 @@ def run_analysis_pipeline(self, analysis_id: str) -> dict:
 
     except Exception as e:
         logger.exception("Analysis %s failed", analysis_id)
-        update_progress(
+        analysis_service.update_progress(
             analysis_id,
             status=AnalysisStatus.FAILED,
             message=f"Error: {e!s}",
@@ -77,14 +85,13 @@ def run_analysis_pipeline(self, analysis_id: str) -> dict:
         return {"analysis_id": analysis_id, "status": "failed", "error": str(e)}
 
 
-def _run_peak_detection(analysis_id: str, config, upload_dir: str, results_dir: str) -> None:
+def _run_peak_detection(analysis_id: str, config, upload_dir: str, results_dir: str, runtime: dict) -> None:
     """Execute peak detection via xcms /run_pipeline → MetaboData HDF5."""
     xcms = engine_registry.get("xcms")
     if xcms is None:
         logger.warning("XCMS adapter not available, skipping peak detection")
         return
 
-    # Use new /run_pipeline endpoint that outputs MetaboData HDF5
     result = asyncio.get_event_loop().run_until_complete(
         xcms.run_pipeline(
             mzml_dir=upload_dir,
@@ -94,21 +101,19 @@ def _run_peak_detection(analysis_id: str, config, upload_dir: str, results_dir: 
         )
     )
 
-    data = _analyses.get(analysis_id)
-    if data:
-        data["metabodata_path"] = result.get("metabodata_path", f"{results_dir}/metabodata.h5")
-        data["n_features"] = result.get("n_features", 0)
+    runtime["metabodata_path"] = result.get("metabodata_path", f"{results_dir}/metabodata.h5")
+    runtime["n_features"] = result.get("n_features", 0)
+    logger.info("Peak detection for %s: %d features", analysis_id, runtime["n_features"])
 
 
-def _run_statistics(analysis_id: str, config, results_dir: str) -> None:
+def _run_statistics(analysis_id: str, config, results_dir: str, runtime: dict) -> None:
     """Execute statistical analysis via stats /run_stats on MetaboData HDF5."""
     stats = engine_registry.get("stats")
     if stats is None:
         logger.warning("Stats adapter not available, skipping statistics")
         return
 
-    data = _analyses.get(analysis_id)
-    metabodata_path = data.get("metabodata_path", f"{results_dir}/metabodata.h5") if data else f"{results_dir}/metabodata.h5"
+    metabodata_path = runtime.get("metabodata_path", f"{results_dir}/metabodata.h5")
 
     result = asyncio.get_event_loop().run_until_complete(
         stats.run_stats(
@@ -119,41 +124,14 @@ def _run_statistics(analysis_id: str, config, results_dir: str) -> None:
         )
     )
 
-    if data:
-        data["metabodata_path"] = result.get("metabodata_path", metabodata_path)
-        data["n_significant"] = result.get("n_significant", 0)
+    runtime["metabodata_path"] = result.get("metabodata_path", metabodata_path)
+    runtime["n_significant"] = result.get("n_significant", 0)
+    logger.info("Statistics for %s: %d significant", analysis_id, runtime["n_significant"])
 
 
-def _run_annotation(analysis_id: str, config, results_dir: str) -> None:
-    """Execute metabolite annotation step (Level 2 + Level 3 + Level 4)."""
-    data = _analyses.get(analysis_id)
-    if data is None:
-        return
-
-    # Build feature list from previous steps (would come from MetaboData in production)
-    features = data.get("features", [])
-    ms2_spectra = data.get("ms2_spectra")  # None if no MS2 data
-
-    annotation_params = config.annotation
-
-    result = asyncio.get_event_loop().run_until_complete(
-        run_layered_annotation(
-            features=features,
-            ms2_spectra=ms2_spectra,
-            params=annotation_params,
-            polarity="positive",
-        )
-    )
-
-    summary = result.get("summary", {})
-    if data is not None:
-        data["n_annotated"] = summary.get("n_level2", 0) + summary.get("n_level3", 0)
-        data["annotation_result"] = result
-
-    logger.info(
-        "Annotation for %s: L2=%d, L3=%d, L4=%d",
-        analysis_id,
-        summary.get("n_level2", 0),
-        summary.get("n_level3", 0),
-        summary.get("n_level4", 0),
-    )
+def _run_annotation(analysis_id: str, config, results_dir: str, runtime: dict) -> None:
+    """Execute metabolite annotation (placeholder — full implementation in Phase 1)."""
+    logger.info("Annotation for %s: using MetaboData at %s", analysis_id, runtime.get("metabodata_path", "N/A"))
+    # TODO: read features from MetaboData HDF5, run annot-worker MS2 matching
+    # For now, annotation is done within the E2E R script (run_e2e_qexactive.R)
+    # Full Python-side annotation will be wired in Phase 1 iteration 2

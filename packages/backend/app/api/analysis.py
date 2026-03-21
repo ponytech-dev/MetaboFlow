@@ -60,7 +60,19 @@ async def start_analysis(analysis_id: str) -> dict:
     # Import here to avoid circular imports at module level
     from app.tasks.analysis_tasks import run_analysis_pipeline
 
-    run_analysis_pipeline.delay(analysis_id)
+    # Retrieve config from DB and pass to Celery task
+    from app.db.base import SessionLocal
+    from app.db.models import Analysis
+    import json
+
+    session = SessionLocal()
+    try:
+        record = session.query(Analysis).filter_by(id=analysis_id).first()
+        config_dict = json.loads(record.config_json) if record and record.config_json else {}
+    finally:
+        session.close()
+
+    run_analysis_pipeline.delay(analysis_id, config_dict)
     return {"analysis_id": analysis_id, "message": "Analysis started"}
 
 

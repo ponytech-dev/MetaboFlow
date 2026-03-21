@@ -8,6 +8,7 @@ celery_app = Celery(
     "metaboflow",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
+    include=["app.tasks.analysis_tasks"],
 )
 
 celery_app.conf.update(
@@ -21,5 +22,4 @@ celery_app.conf.update(
     task_soft_time_limit=6900,  # Soft limit 15 min before hard limit
 )
 
-# Auto-discover tasks
-celery_app.autodiscover_tasks(["app.tasks"])
+# Tasks are registered via include= parameter above
