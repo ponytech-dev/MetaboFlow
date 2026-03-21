@@ -127,6 +127,26 @@ class XCMSAdapter(EngineAdapter):
             },
         }
 
+    async def run_pipeline(
+        self,
+        mzml_dir: str,
+        output_dir: str,
+        polarity: str = "positive",
+        deconv_method: str = "camera",
+    ) -> dict[str, Any]:
+        """Run full xcms pipeline via /run_pipeline → MetaboData HDF5."""
+        payload = {
+            "mzml_dir": mzml_dir,
+            "output_dir": output_dir,
+            "polarity": polarity,
+            "deconv_method": deconv_method,
+        }
+        async with httpx.AsyncClient(timeout=7200) as client:
+            response = await client.post(f"{self._base_url}/run_pipeline", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            return result.get("data", result)
+
     async def health_check(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5) as client:

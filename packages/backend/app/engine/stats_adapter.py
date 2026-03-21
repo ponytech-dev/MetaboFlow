@@ -96,6 +96,26 @@ class StatsAdapter(EngineAdapter):
             },
         }
 
+    async def run_stats(
+        self,
+        metabodata_path: str,
+        output_dir: str,
+        alpha: float = 0.05,
+        fc_cut: float = 1.0,
+    ) -> dict[str, Any]:
+        """Run differential analysis on MetaboData HDF5 via /run_stats."""
+        payload = {
+            "metabodata_path": metabodata_path,
+            "output_dir": output_dir,
+            "alpha": alpha,
+            "fc_cut": fc_cut,
+        }
+        async with httpx.AsyncClient(timeout=3600) as client:
+            response = await client.post(f"{self._base_url}/run_stats", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            return result.get("data", result)
+
     async def health_check(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5) as client:

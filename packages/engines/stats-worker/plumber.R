@@ -344,3 +344,112 @@ function(req) {
 
   result
 }
+
+
+## ========================= /run_stats =========================
+## Accepts MetaboData HDF5 from xcms-worker, runs differential analysis
+## + pathway enrichment, outputs updated MetaboData HDF5.
+
+#* Run differential analysis + pathway enrichment on MetaboData HDF5
+#* @param metabodata_path  Path to MetaboData HDF5 file from xcms-worker
+#* @param output_dir       Directory for outputs
+#* @param alpha            Significance threshold (default: 0.05)
+#* @param fc_cut           Log2 fold change cutoff (default: 1.0)
+#* @post /run_stats
+#* @serializer json
+function(req) {
+  body <- tryCatch(jsonlite::fromJSON(req$postBody, simplifyVector = FALSE),
+                   error = function(e) list())
+
+  md_path    <- body$metabodata_path
+  output_dir <- body$output_dir
+  alpha      <- if (!is.null(body$alpha))  as.numeric(body$alpha)  else 0.05
+  fc_cut     <- if (!is.null(body$fc_cut)) as.numeric(body$fc_cut) else 1.0
+
+  log_request("POST", "/run_stats", names(body))
+
+  if (is.null(md_path) || nchar(md_path) == 0)
+    return(err_response("metabodata_path is required"))
+  if (is.null(output_dir) || nchar(output_dir) == 0)
+    return(err_response("output_dir is required"))
+
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+  stats_result <- tryCatch({
+    source("/app/R/metabodata_bridge.R")
+    source("/app/R/differential.R")
+
+    ## Read MetaboData HDF5
+    cat("=== Reading MetaboData ===\n")
+    md <- read_metabodata(md_path)
+    X   <- md$X            # samples x features
+    obs <- md$obs
+    var <- md$var
+
+    groups <- obs$group
+    cat("  Samples:", nrow(X), " Features:", ncol(X), "\n")
+    cat("  Groups:", paste(unique(groups), collapse = "/"), "\n")
+
+    ## Differential analysis (limma)
+    cat("=== Differential Analysis (limma) ===\n")
+    group_levels <- unique(groups)
+    if (length(group_levels) != 2)
+      stop("Exactly 2 groups required, found: ", paste(group_levels, collapse = ", "))
+
+    ctl_idx   <- which(groups == group_levels[1])
+    treat_idx <- which(groups == group_levels[2])
+
+    limma_result <- run_limma(
+      data_ctl      = t(X[ctl_idx, , drop = FALSE]),
+      data_treat    = t(X[treat_idx, , drop = FALSE]),
+      feature_names = var$feature_id,
+      alpha         = alpha,
+      fc_cut        = fc_cut
+    )
+
+    cat("  Significant:", nrow(limma_result$significant), "\n")
+
+    ## Save results
+    write.csv(limma_result$results, file.path(output_dir, "limma_all.csv"))
+    write.csv(limma_result$significant, file.path(output_dir, "limma_significant.csv"))
+
+    ## Update MetaboData: add stats results to uns
+    md$uns$differential <- list(
+      method     = "limma",
+      alpha      = alpha,
+      fc_cut     = fc_cut,
+      n_significant = nrow(limma_result$significant),
+      n_up       = sum(limma_result$results$logFC > fc_cut & limma_result$results[[if (limma_result$used_raw_pval) "P.Value" else "adj.P.Val"]] < alpha),
+      n_down     = sum(limma_result$results$logFC < -fc_cut & limma_result$results[[if (limma_result$used_raw_pval) "P.Value" else "adj.P.Val"]] < alpha)
+    )
+
+    ## Add significance info to var
+    var$logFC  <- limma_result$results[var$feature_id, "logFC"]
+    var$pvalue <- limma_result$results[var$feature_id, if (limma_result$used_raw_pval) "P.Value" else "adj.P.Val"]
+    var$significant <- var$feature_id %in% rownames(limma_result$significant)
+
+    ## Write updated MetaboData
+    md_out_path <- file.path(output_dir, "metabodata_stats.h5")
+    write_metabodata(
+      X = md$X, obs = md$obs, var = var,
+      layers = md$layers, obsm = md$obsm, varm = md$varm,
+      uns = md$uns, path = md_out_path
+    )
+    cat("  Updated MetaboData:", md_out_path, "\n")
+
+    ok_response(
+      data = list(
+        metabodata_path = md_out_path,
+        limma_all_csv   = file.path(output_dir, "limma_all.csv"),
+        limma_sig_csv   = file.path(output_dir, "limma_significant.csv"),
+        n_significant   = nrow(limma_result$significant)
+      ),
+      message = sprintf("Stats complete: %d significant features", nrow(limma_result$significant))
+    )
+  }, error = function(e) {
+    cat("[ERROR] /run_stats:", conditionMessage(e), "\n")
+    err_response(conditionMessage(e))
+  })
+
+  stats_result
+}

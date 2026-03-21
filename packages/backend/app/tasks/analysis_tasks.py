@@ -78,53 +78,50 @@ def run_analysis_pipeline(self, analysis_id: str) -> dict:
 
 
 def _run_peak_detection(analysis_id: str, config, upload_dir: str, results_dir: str) -> None:
-    """Execute peak detection step."""
+    """Execute peak detection via xcms /run_pipeline → MetaboData HDF5."""
     xcms = engine_registry.get("xcms")
     if xcms is None:
         logger.warning("XCMS adapter not available, skipping peak detection")
         return
 
-    params = {
-        "ppm": config.peak_detection.ppm,
-        "peakwidth": [config.peak_detection.peakwidth_min, config.peak_detection.peakwidth_max],
-        "snthresh": config.peak_detection.snthresh,
-        "noise": config.peak_detection.noise,
-        "min_fraction": config.peak_detection.min_fraction,
-        "polarity": "positive",
-    }
-
-    validation = xcms.validate_params(params)
-    if not validation.is_valid:
-        raise ValueError(f"Invalid XCMS params: {validation.errors}")
-
-    # Run async adapter in sync context (Celery worker)
-    result = asyncio.get_event_loop().run_until_complete(xcms.run(upload_dir, params, results_dir))
+    # Use new /run_pipeline endpoint that outputs MetaboData HDF5
+    result = asyncio.get_event_loop().run_until_complete(
+        xcms.run_pipeline(
+            mzml_dir=upload_dir,
+            output_dir=results_dir,
+            polarity=getattr(config.peak_detection, 'polarity', 'positive'),
+            deconv_method=getattr(config.peak_detection, 'deconv_method', 'camera'),
+        )
+    )
 
     data = _analyses.get(analysis_id)
-    if data and "n_features" in result:
-        data["n_features"] = result["n_features"]
+    if data:
+        data["metabodata_path"] = result.get("metabodata_path", f"{results_dir}/metabodata.h5")
+        data["n_features"] = result.get("n_features", 0)
 
 
 def _run_statistics(analysis_id: str, config, results_dir: str) -> None:
-    """Execute statistical analysis step."""
+    """Execute statistical analysis via stats /run_stats on MetaboData HDF5."""
     stats = engine_registry.get("stats")
     if stats is None:
         logger.warning("Stats adapter not available, skipping statistics")
         return
 
-    params = {
-        "analysis_type": config.statistics.analysis_type.value,
-        "fc_cutoff": config.statistics.fc_cutoff,
-        "p_value_cutoff": config.statistics.p_value_cutoff,
-        "fdr_method": config.statistics.fdr_method,
-    }
-
-    metabodata_path = f"{results_dir}/processed.metabodata"
-    result = asyncio.get_event_loop().run_until_complete(stats.run(metabodata_path, params, results_dir))
-
     data = _analyses.get(analysis_id)
-    if data and "n_significant" in result:
-        data["n_significant"] = result["n_significant"]
+    metabodata_path = data.get("metabodata_path", f"{results_dir}/metabodata.h5") if data else f"{results_dir}/metabodata.h5"
+
+    result = asyncio.get_event_loop().run_until_complete(
+        stats.run_stats(
+            metabodata_path=metabodata_path,
+            output_dir=results_dir,
+            alpha=config.statistics.p_value_cutoff,
+            fc_cut=config.statistics.fc_cutoff,
+        )
+    )
+
+    if data:
+        data["metabodata_path"] = result.get("metabodata_path", metabodata_path)
+        data["n_significant"] = result.get("n_significant", 0)
 
 
 def _run_annotation(analysis_id: str, config, results_dir: str) -> None:

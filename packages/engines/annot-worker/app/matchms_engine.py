@@ -49,7 +49,11 @@ def _apply_filters(spectrum: Spectrum) -> Spectrum | None:
 @lru_cache(maxsize=20)
 def _load_library(file_path: str) -> list[Spectrum]:
     """Load and filter spectra from a single MSP file. Cached in memory."""
-    full_path = os.path.join(settings.library_dir, file_path)
+    # Try deduplicated/ first, then converted/, then raw path
+    full_path = os.path.join(settings.library_base_path, file_path)
+    if not os.path.exists(full_path):
+        # Fallback: try file_path as-is (might be a full registry path like "converted/xxx.msp")
+        full_path = os.path.join(settings.library_dir, file_path)
     if not os.path.exists(full_path):
         logger.warning(f"Library file not found: {full_path}")
         return []

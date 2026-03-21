@@ -69,3 +69,4 @@ spectral_libraries
 *.cdf
 *.mzML
 *.raw
+tests/e2e/results_qe_v3/
