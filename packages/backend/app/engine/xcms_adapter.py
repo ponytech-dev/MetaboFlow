@@ -133,14 +133,17 @@ class XCMSAdapter(EngineAdapter):
         output_dir: str,
         polarity: str = "positive",
         deconv_method: str = "camera",
+        sample_metadata: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Run full xcms pipeline via /run_pipeline → MetaboData HDF5."""
-        payload = {
+        payload: dict[str, Any] = {
             "mzml_dir": mzml_dir,
             "output_dir": output_dir,
             "polarity": polarity,
             "deconv_method": deconv_method,
         }
+        if sample_metadata:
+            payload["sample_metadata"] = sample_metadata
         async with httpx.AsyncClient(timeout=7200) as client:
             response = await client.post(f"{self._base_url}/run_pipeline", json=payload)
             response.raise_for_status()

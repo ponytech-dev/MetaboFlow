@@ -270,16 +270,18 @@ function(req) {
 #* @param output_dir  Directory for outputs
 #* @param polarity    "positive" or "negative" (default: "positive")
 #* @param deconv_method  "camera", "cliquems", or "msflo" (default: "camera")
+#* @param sample_metadata  List of {sample_id, group} objects (optional)
 #* @post /run_pipeline
 #* @serializer json
 function(req) {
   body <- tryCatch(jsonlite::fromJSON(req$postBody, simplifyVector = FALSE),
                    error = function(e) list())
 
-  mzml_dir      <- body$mzml_dir
-  output_dir    <- body$output_dir
-  polarity      <- if (!is.null(body$polarity)) body$polarity else "positive"
-  deconv_method <- if (!is.null(body$deconv_method)) body$deconv_method else "camera"
+  mzml_dir        <- body$mzml_dir
+  output_dir       <- body$output_dir
+  polarity         <- if (!is.null(body$polarity)) body$polarity else "positive"
+  deconv_method    <- if (!is.null(body$deconv_method)) body$deconv_method else "camera"
+  sample_metadata  <- body$sample_metadata
 
   log_request("POST", "/run_pipeline", names(body))
 
@@ -304,7 +306,25 @@ function(req) {
     if (length(mzml_files) == 0) stop("No mzML files in ", mzml_dir)
 
     sample_names <- gsub("\\.mzML$", "", basename(mzml_files))
-    sample_group <- ifelse(grepl("^SA|^WT|^CTL|^C", sample_names), "A", "B")
+
+    # Use sample_metadata from API if provided, otherwise fallback to regex
+    if (!is.null(sample_metadata) && length(sample_metadata) > 0) {
+      meta_df <- do.call(rbind, lapply(sample_metadata, as.data.frame, stringsAsFactors = FALSE))
+      # Match by sample_id to file order
+      m <- match(sample_names, meta_df$sample_id)
+      if (any(is.na(m))) {
+        unmatched <- sample_names[is.na(m)]
+        cat("  WARNING: unmatched samples:", paste(unmatched, collapse = ", "), "\n")
+        # Fallback for unmatched
+        sample_group <- ifelse(grepl("^SA|^WT|^CTL|^C", sample_names), "A", "B")
+      } else {
+        sample_group <- meta_df$group[m]
+      }
+    } else {
+      sample_group <- ifelse(grepl("^SA|^WT|^CTL|^C", sample_names), "A", "B")
+    }
+    cat("  Samples:", paste(sample_names, collapse = ", "), "\n")
+    cat("  Groups:", paste(sample_group, collapse = ", "), "\n")
 
     raw_data <- readMSData(mzml_files, mode = "onDisk")
     raw_data <- filterMsLevel(raw_data, msLevel = 1L)
@@ -317,6 +337,9 @@ function(req) {
     if (length(mzml_files) >= 4) {
       pgp <- PeakGroupsParam(minFraction = 0.5)
       xdata <- adjustRtime(xdata, param = pgp)
+      # Rebuild pdp after RT adjustment to avoid stale environment references
+      pdp <- PeakDensityParam(sampleGroups = sample_group,
+                               minFraction = 0.5, bw = 3, binSize = 0.025)
       xdata <- groupChromPeaks(xdata, param = pdp)
     }
     xdata <- fillChromPeaks(xdata)

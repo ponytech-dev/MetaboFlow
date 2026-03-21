@@ -91,17 +91,31 @@ def _run_peak_detection(analysis_id: str, config, upload_dir: str, results_dir: 
         logger.warning("XCMS adapter not available, skipping peak detection")
         return
 
+    # Pass sample_metadata so xcms-worker knows the group assignments
+    sample_meta = [
+        {"sample_id": s.sample_id, "group": s.group}
+        for s in config.sample_metadata
+    ]
+
     result = asyncio.get_event_loop().run_until_complete(
         xcms.run_pipeline(
             mzml_dir=upload_dir,
             output_dir=results_dir,
             polarity=getattr(config.peak_detection, 'polarity', 'positive'),
             deconv_method=getattr(config.peak_detection, 'deconv_method', 'camera'),
+            sample_metadata=sample_meta,
         )
     )
 
+    # Check for xcms-worker errors
+    if result.get("success") is False or result.get("error"):
+        error_msg = result.get("error", "Unknown xcms-worker error")
+        raise RuntimeError(f"Peak detection failed: {error_msg}")
+
     runtime["metabodata_path"] = result.get("metabodata_path", f"{results_dir}/metabodata.h5")
     runtime["n_features"] = result.get("n_features", 0)
+    if runtime["n_features"] == 0:
+        raise RuntimeError("Peak detection returned 0 features — check xcms-worker logs")
     logger.info("Peak detection for %s: %d features", analysis_id, runtime["n_features"])
 
 
