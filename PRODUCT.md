@@ -1,6 +1,6 @@
 # MetaboFlow — 产品文档
 
-> 最后更新：2026-03-19
+> 最后更新：2026-03-21
 > 自动维护：代码变更时由 Claude Code 同步更新
 
 ## 定位
@@ -27,22 +27,42 @@
 - 📋 MS-DIAL 引擎适配器
 - 📋 MZmine 引擎适配器
 - 📋 多引擎并行对比模式
-- 📋 自动报告生成（Nature 级图表）
-- 📋 chart-service（出版级可视化服务）
+- 📋 自动报告生成（PDF + Word 双格式，含自动 Methods 段落）
+- 📋 chart-service（50 种发表级图表模板：20 基础 + 30 高级，R 端渲染）
+- 📋 用户认证（邀请码 + 邮箱密码 + JWT）
 
 ## 核心工作流
 
 ```
-用户上传 mzML/mzXML
-  → 选择引擎（XCMS / MS-DIAL / MZmine）
-  → 配置参数（或用预设）
-  → 执行分析管线
-     ├── 峰检测 → 分组 → Gap-fill → Feature 提取
-     ├── 差异分析（fold change + t-test）
-     ├── 通路富集（ORA / GSEA）
-     └── 图表生成（火山图 / 热图 / PCA / 通路图）
-  → 下载结果 + 分析报告
+/projects                    → 项目列表
+/projects/:id/upload         → 上传 mzML/mzXML
+/projects/:id/pipeline       → Pipeline 设计器（每环节选引擎+调参数，支持多条 pipeline 组合）
+/projects/:id/monitor        → 实时运行监控（SSE 推送）
+/projects/:id/results        → 结果展示（6 Tab：Overview/Charts/Features/Annotation/Pathway/Report）
+/projects/:id/report         → 报告导出（PDF + Word）
 ```
+
+### Pipeline 设计器
+
+- 每个分析环节 dropdown 选择引擎（Phase 1 各环节仅 1 个选项）
+- 每个引擎独立参数面板
+- 可创建多条 pipeline 组合，"Run All" 同时启动
+- 架构预留：引擎列表来自后端 `/engines` API，Phase 2 新引擎直接出现
+
+### 图表模板系统
+
+- 50 种模板：20 基础（高频必做）+ 30 高级（多变量复合）
+- 调研来源：Nature/Science 正刊+子刊 2020-2026 代谢组学论文
+- R 端渲染（ggplot2 + ComplexHeatmap），统一 Nature 风格配色
+- 每种图表附中英文解读说明
+- 一键出图，发表级质量（SVG/PDF/PNG）
+- 数据源分类（A/B/C/D）+ 筛选敏感性标注
+
+### 报告导出
+
+- PDF（Quarto）+ Word（officer R 包）双格式
+- 自动生成可发表 Methods 段落（引擎+参数自动填入）
+- 报告图表复用图表模板系统输出（300 dpi PNG）
 
 ## 技术架构
 
@@ -71,9 +91,10 @@ packages/
 
 ## 当前限制
 
-- 仅支持 xcms 引擎，MS-DIAL 和 MZmine 适配器未开发
-- 无 Web 界面，需命令行操作
-- 图表生成依赖 R，尚未独立为 chart-service
+- 仅支持 xcms 引擎，MS-DIAL 和 MZmine 适配器 Phase 2 开发
+- Web 界面骨架已搭建，结果展示页和图表系统开发中
+- 图表模板系统开发中（50 种模板）
+- 用户认证系统待实现
 
 ## 集成点
 
@@ -98,4 +119,6 @@ packages/
 
 | 日期 | 变更 | commit |
 |------|------|--------|
+| 2026-03-21 | Phase 1 设计确认：图表模板系统(50种)、前端多页架构、报告导出(PDF+Word)、用户认证(邀请码+JWT) | — |
+| 2026-03-21 | 全栈 E2E 验证通过（2样本，42,216 features，594.7s） | — |
 | 2026-03-15 | 产品开发计划 v2.0 确认 | — |
