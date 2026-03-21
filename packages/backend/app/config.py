@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://localhost:6379/1"
 
     # File storage
-    upload_dir: str = "./data/uploads"
-    results_dir: str = "./data/results"
+    upload_dir: str = "/data/uploads"
+    results_dir: str = "/data/results"
 
     # Engine worker URLs
     xcms_worker_url: str = "http://localhost:8001"
