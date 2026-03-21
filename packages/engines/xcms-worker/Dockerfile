@@ -33,17 +33,15 @@ RUN if [ -f renv.lock ]; then \
             options(repos = c(CRAN = 'https://cloud.r-project.org')); \
             if (!requireNamespace('BiocManager', quietly = TRUE)) \
                 install.packages('BiocManager'); \
-            BiocManager::install(version = '3.19', ask = FALSE, update = FALSE); \
+            BiocManager::install(version = '3.20', ask = FALSE, update = FALSE); \
+            # Core Bioconductor packages for peak detection
+            BiocManager::install(c('xcms', 'MSnbase', 'CAMERA'), ask = FALSE, update = FALSE); \
             # Plumber HTTP API server
             install.packages('plumber'); \
-            # JSON serialization (used by plumber endpoints)
+            # JSON serialization + HDF5 for MetaboData bridge
             install.packages('jsonlite'); \
-            # Core tidymass ecosystem
-            # NOTE: these packages are large; uncomment as needed or use renv.lock
-            # install.packages('remotes');
-            # remotes::install_github('tidymass/massdataset');
-            # remotes::install_github('tidymass/massprocesser');
-            # Lightweight CRAN deps that are always safe to install
+            BiocManager::install('rhdf5', ask = FALSE, update = FALSE); \
+            # Lightweight CRAN deps
             install.packages(c('dplyr', 'tibble', 'stringr', 'purrr', 'rlang')); \
         "; \
     fi
