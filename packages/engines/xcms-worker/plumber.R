@@ -259,3 +259,136 @@ function(req) {
 
   result
 }
+
+
+## ========================= /run_pipeline =========================
+## Unified pipeline: peak detection → deconvolution → preprocessing
+## → outputs MetaboData HDF5 for cross-engine workflows.
+
+#* Run full xcms pipeline, output MetaboData HDF5
+#* @param mzml_dir    Directory containing mzML files
+#* @param output_dir  Directory for outputs
+#* @param polarity    "positive" or "negative" (default: "positive")
+#* @param deconv_method  "camera", "cliquems", or "msflo" (default: "camera")
+#* @post /run_pipeline
+#* @serializer json
+function(req) {
+  body <- tryCatch(jsonlite::fromJSON(req$postBody, simplifyVector = FALSE),
+                   error = function(e) list())
+
+  mzml_dir      <- body$mzml_dir
+  output_dir    <- body$output_dir
+  polarity      <- if (!is.null(body$polarity)) body$polarity else "positive"
+  deconv_method <- if (!is.null(body$deconv_method)) body$deconv_method else "camera"
+
+  log_request("POST", "/run_pipeline", names(body))
+
+  if (is.null(mzml_dir) || nchar(mzml_dir) == 0)
+    return(err_response("mzml_dir is required"))
+  if (is.null(output_dir) || nchar(output_dir) == 0)
+    return(err_response("output_dir is required"))
+
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+  pipeline_result <- tryCatch({
+    suppressPackageStartupMessages({
+      library(MSnbase)
+      library(xcms)
+    })
+    source("/app/R/feature_deconvolution.R")
+    source("/app/R/metabodata_bridge.R")
+
+    ## --- Step 1: Peak Detection ---
+    cat("=== Step 1: Peak Detection ===\n")
+    mzml_files <- sort(list.files(mzml_dir, pattern = "\\.mzML$", full.names = TRUE))
+    if (length(mzml_files) == 0) stop("No mzML files in ", mzml_dir)
+
+    sample_names <- gsub("\\.mzML$", "", basename(mzml_files))
+    sample_group <- ifelse(grepl("^SA|^WT|^CTL|^C", sample_names), "A", "B")
+
+    raw_data <- readMSData(mzml_files, mode = "onDisk")
+    raw_data <- filterMsLevel(raw_data, msLevel = 1L)
+    cwp <- CentWaveParam(ppm = 5, peakwidth = c(5, 30), snthresh = 10,
+                          noise = 1000, prefilter = c(3, 1000))
+    xdata <- findChromPeaks(raw_data, param = cwp)
+    pdp <- PeakDensityParam(sampleGroups = sample_group,
+                             minFraction = 0.5, bw = 3, binSize = 0.025)
+    xdata <- groupChromPeaks(xdata, param = pdp)
+    if (length(mzml_files) >= 4) {
+      pgp <- PeakGroupsParam(minFraction = 0.5)
+      xdata <- adjustRtime(xdata, param = pgp)
+      xdata <- groupChromPeaks(xdata, param = pdp)
+    }
+    xdata <- fillChromPeaks(xdata)
+    feature_values <- featureValues(xdata, value = "into", method = "maxint")
+    feature_defs   <- featureDefinitions(xdata)
+    cat("  Features:", nrow(feature_values), "\n")
+
+    ## --- Step 1b: Deconvolution ---
+    cat("=== Step 1b: Deconvolution ===\n")
+    deconv_result <- tryCatch(
+      deconvolve_features(xdata, method = deconv_method, polarity = polarity),
+      error = function(e) { cat("  Deconv skipped:", conditionMessage(e), "\n"); NULL }
+    )
+
+    ## --- Step 2: Preprocessing ---
+    cat("=== Step 2: Preprocessing ===\n")
+    int_matrix <- as.matrix(feature_values)
+    keep <- rowMeans(is.na(int_matrix)) <= 0.5
+    int_matrix <- int_matrix[keep, ]
+    for (i in seq_len(nrow(int_matrix))) {
+      na_idx <- is.na(int_matrix[i, ])
+      if (any(na_idx)) int_matrix[i, na_idx] <- min(int_matrix[i, !na_idx], na.rm = TRUE) / 2
+    }
+    int_log <- log2(int_matrix + 1)
+    col_med <- apply(int_log, 2, median)
+    int_norm <- sweep(int_log, 2, median(col_med) - col_med, "+")
+    cat("  Processed:", nrow(int_norm), "x", ncol(int_norm), "\n")
+
+    ## --- Build MetaboData HDF5 ---
+    cat("=== Building MetaboData ===\n")
+    obs_df <- data.frame(sample_id = sample_names, group = sample_group,
+                          batch = "1", sample_type = "sample",
+                          row.names = sample_names, stringsAsFactors = FALSE)
+    feat_ids <- rownames(int_norm)
+    var_df <- data.frame(feature_id = feat_ids,
+                          mz = feature_defs[feat_ids, "mzmed"],
+                          rt = feature_defs[feat_ids, "rtmed"],
+                          row.names = feat_ids, stringsAsFactors = FALSE)
+    if (!is.null(deconv_result)) {
+      m <- match(feat_ids, deconv_result$feature_id)
+      var_df$adduct_group   <- deconv_result$adduct_group[m]
+      var_df$adduct_type    <- deconv_result$adduct_type[m]
+      var_df$representative <- deconv_result$representative[m]
+    }
+
+    md_path <- file.path(output_dir, "metabodata.h5")
+    write_metabodata(
+      X = t(int_norm), obs = obs_df, var = var_df,
+      layers = list(raw = t(as.matrix(feature_values[feat_ids, ])), normalized = t(int_norm)),
+      uns = list(engine = "xcms", engine_version = as.character(packageVersion("xcms")),
+                  polarity = polarity, deconv_method = deconv_method,
+                  n_features_raw = nrow(feature_values),
+                  n_features_processed = nrow(int_norm),
+                  timestamp = format(Sys.time(), "%Y-%m-%dT%H:%M:%S")),
+      path = md_path
+    )
+    write.csv(data.frame(feature_id = feat_ids, mz = var_df$mz, rt = var_df$rt,
+                          int_norm, check.names = FALSE),
+              file.path(output_dir, "peak_table.csv"), row.names = FALSE)
+    cat("  Saved:", md_path, "\n")
+
+    ok_response(
+      data = list(metabodata_path = md_path,
+                   peak_table_csv = file.path(output_dir, "peak_table.csv"),
+                   n_samples = length(sample_names),
+                   n_features = nrow(int_norm)),
+      message = sprintf("Pipeline complete: %d features", nrow(int_norm))
+    )
+  }, error = function(e) {
+    cat("[ERROR] /run_pipeline:", conditionMessage(e), "\n")
+    err_response(conditionMessage(e))
+  })
+
+  pipeline_result
+}
