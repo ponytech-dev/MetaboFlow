@@ -35,6 +35,8 @@ RUN Rscript -e " \
     install.packages(c('ggplot2', 'dplyr', 'tidyr', 'ggrepel', 'openxlsx', 'pheatmap')); \
     # limma from Bioconductor
     BiocManager::install('limma', ask = FALSE, update = FALSE); \
+    # rhdf5 for MetaboData HDF5 bridge
+    BiocManager::install('rhdf5', ask = FALSE, update = FALSE); \
     # MetaboAnalystR — large package, uncomment when ready for production build
     # install.packages('remotes');
     # remotes::install_github('xia-lab/MetaboAnalystR', build = FALSE); \

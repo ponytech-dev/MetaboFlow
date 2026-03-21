@@ -137,6 +137,11 @@ def _run_statistics(analysis_id: str, config, results_dir: str, runtime: dict) -
         )
     )
 
+    # Check for stats-worker errors
+    if result.get("success") is False or result.get("error"):
+        error_msg = result.get("error", "Unknown stats-worker error")
+        raise RuntimeError(f"Statistical analysis failed: {error_msg}")
+
     runtime["metabodata_path"] = result.get("metabodata_path", metabodata_path)
     runtime["n_significant"] = result.get("n_significant", 0)
     logger.info("Statistics for %s: %d significant", analysis_id, runtime["n_significant"])
