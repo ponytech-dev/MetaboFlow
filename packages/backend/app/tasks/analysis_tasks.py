@@ -112,8 +112,11 @@ def _run_peak_detection(analysis_id: str, config, upload_dir: str, results_dir: 
         error_msg = result.get("error", "Unknown xcms-worker error")
         raise RuntimeError(f"Peak detection failed: {error_msg}")
 
-    runtime["metabodata_path"] = result.get("metabodata_path", f"{results_dir}/metabodata.h5")
-    runtime["n_features"] = result.get("n_features", 0)
+    # R JSON serialization wraps scalars in single-element arrays — unwrap them
+    md_path = result.get("metabodata_path", f"{results_dir}/metabodata.h5")
+    runtime["metabodata_path"] = md_path[0] if isinstance(md_path, list) else md_path
+    n_feat = result.get("n_features", 0)
+    runtime["n_features"] = n_feat[0] if isinstance(n_feat, list) else n_feat
     if runtime["n_features"] == 0:
         raise RuntimeError("Peak detection returned 0 features — check xcms-worker logs")
     logger.info("Peak detection for %s: %d features", analysis_id, runtime["n_features"])
@@ -142,8 +145,11 @@ def _run_statistics(analysis_id: str, config, results_dir: str, runtime: dict) -
         error_msg = result.get("error", "Unknown stats-worker error")
         raise RuntimeError(f"Statistical analysis failed: {error_msg}")
 
-    runtime["metabodata_path"] = result.get("metabodata_path", metabodata_path)
-    runtime["n_significant"] = result.get("n_significant", 0)
+    # R JSON: unwrap single-element arrays
+    md_path = result.get("metabodata_path", metabodata_path)
+    runtime["metabodata_path"] = md_path[0] if isinstance(md_path, list) else md_path
+    n_sig = result.get("n_significant", 0)
+    runtime["n_significant"] = n_sig[0] if isinstance(n_sig, list) else n_sig
     logger.info("Statistics for %s: %d significant", analysis_id, runtime["n_significant"])
 
 
