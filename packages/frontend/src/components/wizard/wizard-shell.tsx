@@ -63,32 +63,24 @@ export function WizardShell() {
 
                 // Step 2: Start analysis with all wizard parameters
                 const { id } = await startAnalysis({
-                  peak_detection: {
-                    engine: selectedEngine ?? 'xcms',
-                    ppm: peakParams.ppm,
-                    peakwidth_min: peakParams.peakwidthMin,
-                    peakwidth_max: peakParams.peakwidthMax,
-                    snthresh: peakParams.snthresh,
-                    noise: peakParams.noise,
-                    polarity: 'positive',
-                    deconv_method: 'camera',
-                  },
-                  statistics: {
-                    analysis_type: 'differential',
-                    fc_cutoff: fcCutoff,
-                    p_value_cutoff: pValueCutoff,
-                    fdr_method: 'BH',
-                  },
-                  annotation: {
-                    databases,
-                    ms1_ppm: ms1Ppm,
-                    use_sirius: useSirius,
-                  },
-                  pathway: {
-                    workflows: pathwayWorkflows,
-                    organism,
-                  },
-                  file_paths: uploadedPaths,
+                  files: uploadedPaths,
+                  sampleMetadata: [],
+                  selectedEngine: selectedEngine ?? 'xcms',
+                  peakParams,
+                  multiEngineMode: false,
+                  batchMethod: 'SERRF',
+                  analysisType: 'Differential',
+                  groupComparison: null,
+                  fcCutoff,
+                  pValueCutoff,
+                  databases,
+                  ms1Ppm,
+                  useSirius,
+                  pathwayWorkflows,
+                  organism,
+                  sigThreshold: 0.05,
+                  chartTypes: ['Volcano', 'PCA', 'Heatmap'],
+                  exportFormat: 'PDF',
                 });
 
                 setAnalysisId(id);
