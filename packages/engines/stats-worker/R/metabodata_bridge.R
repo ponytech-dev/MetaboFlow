@@ -173,14 +173,20 @@ read_metabodata <- function(path) {
   # Read index
   idx <- rhdf5::h5read(path, paste0(group_name, "/_index"))
 
-  # Read column names
-  fid <- rhdf5::H5Fopen(path)
-  gid <- rhdf5::H5Gopen(fid, group_name)
-  col_names_json <- rhdf5::h5readAttributes(gid, "column_names")
-  rhdf5::H5Gclose(gid)
-  rhdf5::H5Fclose(fid)
-
-  col_names <- jsonlite::fromJSON(col_names_json)
+  # Read column names — try attribute first, fallback to listing datasets
+  col_names <- tryCatch({
+    fid <- rhdf5::H5Fopen(path)
+    gid <- rhdf5::H5Gopen(fid, group_name)
+    col_names_json <- rhdf5::h5readAttributes(gid, "column_names")
+    rhdf5::H5Gclose(gid)
+    rhdf5::H5Fclose(fid)
+    jsonlite::fromJSON(col_names_json)
+  }, error = function(e) {
+    # Fallback: infer column names from datasets in group (exclude _index)
+    contents <- rhdf5::h5ls(path)
+    grp_contents <- contents[contents$group == paste0("/", group_name), ]
+    setdiff(grp_contents$name, "_index")
+  })
 
   # Read columns
   data <- list()
