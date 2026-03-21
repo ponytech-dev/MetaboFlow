@@ -56,7 +56,7 @@
 | Features | 可排序/可搜索 feature 表（m/z, RT, FC, p-value, adj. p-value） | MetaboData 统计层 |
 | Annotation | 注释结果表（compound name, SMILES, match score, MSI level, 来源库） | annot-worker |
 | Pathway | 通路富集结果 + 气泡图 | pathway_ora.R |
-| Report | 报告预览 + 下载按钮（PDF / Word） | 报告生成服务 |
+报告功能全部在独立的 `/projects/:id/report` 页面，不在 Results Tab 中重复。
 
 ## Features 筛选联动（B 方案）
 
@@ -68,6 +68,10 @@ Features Tab 的 p-value / fold change 筛选影响一组"筛选敏感"图表，
 
 - "一键出图"：用户勾选图表类型 → Generate → 后端调 R 模板批量渲染 → SSE 推送进度 → 完成后刷新画廊
 - 单张下载（SVG/PDF/PNG）或打包下载（ZIP）
+
+## 多 Pipeline 结果展示
+
+Phase 1 实际只有单 pipeline（每环节 1 个引擎），结果展示基于单 pipeline 的 5 Tab 结构。Phase 2 引入多引擎后，增加 pipeline 切换器和 Venn 对比视图，具体设计在 Phase 2 规划中定义。
 
 ## 架构预留（多引擎）
 

@@ -111,7 +111,9 @@ chart-templates/
 | Features | 可排序/搜索 feature 表，筛选联动"筛选敏感"图表 |
 | Annotation | 注释结果表 |
 | Pathway | 通路富集结果 + 气泡图 |
-| Report | 报告预览 + 下载（PDF / Word） |
+
+
+报告功能在独立 `/projects/:id/report` 页面，不在 Results Tab 中重复。Phase 1 单 pipeline，多 pipeline 结果切换在 Phase 2 设计。
 
 ### 架构预留
 - 引擎列表来自后端 `/engines` API
@@ -177,7 +179,7 @@ chart-templates/
 | 线 | 内容 | 依赖 |
 |----|------|------|
 | 线 0 | 4 样本 E2E 验证（limma significant features） | 无，最先做 |
-| 线 1 | 图表模板调研+实现（50 种，4 Agent 并行） | 线 0 提供真实数据 |
+| 线 1 | 图表模板调研+实现（50 种，4 Agent 并行） | 调研阶段无依赖可并行，模板调试需线 0 真实数据 |
 | 线 2 | 前端多页架构 + 结果展示 + 报告导出 | 线 0 + 线 1 |
 | 线 3 | 用户认证 | 无，独立并行 |
 

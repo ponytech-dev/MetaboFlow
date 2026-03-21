@@ -40,8 +40,16 @@ PDF + Word 双格式报告导出，含自动生成的可发表 Methods 段落。
 - 复用图表模板系统生成的 PNG（300 dpi），不重新渲染
 - 用户可在结果页选择哪些图表放入报告
 
+## 图表选择
+
+- 图表选择 UI 在 `/projects/:id/report` 页面（不在 Results 页）
+- 用户勾选要放入报告的图表 → 选择状态存入 DB（analysis 关联）→ 刷新后保留
+- 报告生成为异步操作，SSE 推送渲染进度
+
 ## 技术实现
 
 - PDF：Quarto `.qmd` 模板 + R 渲染
 - Word：officer R 包，预设 Word 模板（含 MetaboFlow 页眉页脚）
 - Methods 模板：YAML 配置文件，每个引擎一段模板文本 + 参数占位符
+- Quarto 运行在 stats-worker 容器（已有 R + 依赖），版本锁定在 Dockerfile 中
+- 渲染时通过共享 `/data` volume 访问 PNG 文件
