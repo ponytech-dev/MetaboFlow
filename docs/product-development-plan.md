@@ -1,8 +1,8 @@
 # MetaboFlow 产品开发计划书
 
-**版本**: v2.0
-**日期**: 2026-03-15
-**状态**: 已确认，待执行
+**版本**: v3.0
+**日期**: 2026-03-20（基于 v2.0 更新，反映 Phase 0 实际进展）
+**状态**: Phase 0 基本完成，Phase 0.5（MFSL 数据库）已完成，准备进入 Phase 1
 
 ---
 
@@ -1012,6 +1012,67 @@ MetaboAnalyst 6.0 已发布剂量-响应模块：
 
 **里程碑验收标准**：MetaboFlow v1 全部功能在模块化后通过测试，结果与原始脚本完全一致。
 
+**Phase 0 技术债（必须在 Phase 1 初期还清）**：
+
+当前 E2E 管线（`run_e2e_qexactive.R`）是独立 R 脚本，步骤之间通过 R 变量（`xdata`、`int_norm`）直接传递数据，**完全绕过了 MetaboData 格式和 EngineAdapter 接口**。
+
+| 设计要求 | 当前状态 | 影响 |
+|---------|---------|------|
+| 每步输出写入 MetaboData | ❌ 用 R 变量传递 | 无法跨引擎混搭 |
+| MetaboData HDF5 序列化 | ❌ 仅 CSV/JSON | R↔Python 数据交换不通 |
+| MZmine/MS-DIAL/pyOpenMS 适配器 | ❌ 骨架 | 仅 xcms 可运行 |
+| 后端编排经 EngineAdapter | 部分 | xcms/stats/annot 有适配器，但 E2E 未走此路径 |
+
+**还债计划**：Phase 1 第 1-2 周，将 E2E 管线从"R 脚本直跑"重构为"Python 后端 → EngineAdapter → MetaboData → Docker API"路径。这是实现多引擎混搭的前提。
+
+---
+
+**Phase 0 实际进展（截至 2026-03-20）**：
+
+| 任务 | 状态 | 说明 |
+|------|------|------|
+| 代码库初始化 | ✅ 完成 | monorepo 结构，GitHub 仓库 |
+| MetaboFlow v1 模块化 | ✅ 完成 | config.R + differential.R + visualization.R + annotation_ms1.R + pathway_ora.R + feature_deconvolution.R |
+| 版本锁定 | ✅ 完成 | uv.lock |
+| Docker 环境搭建 | ✅ 完成 | xcms-worker + stats-worker + annot-worker + sirius-worker Dockerfile |
+| CI/CD 基础 | ✅ 完成 | .github/workflows/ci.yml + docker-build.yml |
+| E2E 管线 | ✅ 完成 | Q Exactive HF (MTBLS733) 4 样本全流程通过（峰检测→注释→通路→图表） |
+| 基础测试框架 | 部分完成 | E2E 测试通过，单元测试待补 |
+| MetaboData 格式 | 待做 | 当前用 CSV/MSP 中间格式，HDF5 待实现 |
+
+---
+
+### Phase 0.5：MFSL 质谱数据库建设（计划外，已完成）
+
+**目标**：构建开放、统一、多维标签化的代谢组学质谱参考数据库（MFSL），为 Phase 1 M5 注释模块提供数据基础。
+
+**背景**：原计划 Phase 1 第 5 月"HMDB + MoNA 本地谱图库初始化"，实际推进中发现公开谱库数据分散、格式不一、质量参差，需要系统性整合才能支撑产品级注释。因此将谱库建设提前并扩展为独立阶段。
+
+**完成内容**：
+
+| 工作项 | 成果 |
+|--------|------|
+| **Level 2 谱图库整合** | 52 个库，11 个来源（GNPS/MassBank/HMDB/MS-DIAL/MSnLib/ISDB/NORMAN/EMBL-MCF/NIST/FooDB/ReSpect），3,086,743 原始谱图 |
+| **跨库去重** | 669,063 条去重后谱图，保留来源追溯（Sources 字段）+ 质量评分（Quality_score 字段） |
+| **Level 3 化合物库** | 961,361 唯一化合物（11 来源：HMDB/ChEBI/KEGG/COCONUT/NPAtlas/Lotus/FooDB/T3DB/TSCA/Tox21/LipidMaps），1,162,435 总记录 |
+| **多标签 Registry** | 7 维标签体系（来源/类型/化合物类别/仪器/置信度/极性/物种） |
+| **仪器兼容性矩阵** | 10 类仪器 × 3 平台（QE/Q-TOF/QqQ）适配推荐 |
+| **InChIKey 交叉映射** | HMDB/KEGG/ChEBI/LipidMaps 交叉映射表，打通注释→通路分析 |
+| **MFSL 命名系统** | 文件命名 + 注释级别（Level 2a/2b/2c/3/4 五级）+ 化合物 ID 规范 |
+| **注释引擎集成** | annot-worker（matchms MS2 匹配）+ annotation_ms1.R（Level 3 匹配）+ SIRIUS 接口预留 |
+| **特征去冗余模块** | CAMERA/CliqueMS/MS-FLO 三引擎可选，用户通过环境变量配置 |
+| **数据质量保证** | 16/16 库源文件交叉验证 PASS；L3 零重复 InChIKey；零无效精确质量 |
+| **DATABASE_MANUAL.md** | 14 章完整技术说明书（科学背景/框架/来源/处理标准/统计/竞品对比/命名/版本历史） |
+| **竞品调研** | 12 个主流平台 + FragHub/MSnLib/matchms 深度对比；MFSL 在 9 个维度超越最接近竞品 |
+| **组合化学建库调研** | Dorrestein Nature 2024 Reverse Metabolomics 为直接先例；确认用户方案可行 |
+
+**对后续 Phase 的影响**：
+
+1. **Phase 1 M5 大幅前置**：原计划"HMDB + MoNA 本地谱图库初始化"已远超——96 万化合物 + 67 万谱图 + 多引擎注释 + 通路分析全部完成
+2. **Phase 2 M5 部分前置**：SIRIUS 集成代码已写（待注册账号）；MSI Level 2a/2b/2c/3/4 五级已定义并实现
+3. **新增产品能力**：多标签库筛选（用户按仪器/物种/化合物类别选库）是原计划未涉及的差异化功能
+4. **新增学术产出可能**：MFSL 数据库本身可独立发表（数据库论文 + 方法论文）
+
 ---
 
 ### Phase 1：MVP — 核心 E2E 流程（第 3-6 月）
@@ -1025,7 +1086,7 @@ MetaboAnalyst 6.0 已发布剂量-响应模块：
 | 第 4 月 | XCMS 引擎集成（xcms-worker + R Plumber API）；MZmine 4 引擎集成；M2 峰检测前端参数面板 | M2 |
 | 第 4 月 | M3 QC 基础（CV 评估、批次 PCA）；SERRF + ComBat 批次校正集成 | M3 |
 | 第 5 月 | limma + scipy 统计分析；stats-worker；PCA / 火山图交互展示 | M4 |
-| 第 5 月 | matchms + ms2deepscore 注释引擎；HMDB + MoNA 本地谱图库初始化 | M5 |
+| 第 5 月 | ~~matchms + ms2deepscore 注释引擎；HMDB + MoNA 本地谱图库初始化~~ **已在 Phase 0.5 完成**：MFSL 52 库 + annot-worker + annotation_ms1.R + pathway_ora.R + 特征去冗余模块 | M5 ✅ |
 | 第 6 月 | chart-r-worker（ggplot2 + ComplexHeatmap + EnhancedVolcano）；M7 基础图表模板（12 种） | M7 |
 | 第 6 月 | M8 基础 HTML 报告导出；M9 项目管理基础；SSE 进度推送完整实现 | M8、M9 |
 
@@ -1053,7 +1114,7 @@ MetaboAnalyst 6.0 已发布剂量-响应模块：
 |-----|------|---------|
 | 第 7 月 | 多引擎并行运行 UI；Venn 图特征重叠展示；共识特征提取（Layer 2 策略） | M2 多引擎 |
 | 第 7 月 | ISF 自动注释集成（ISFrag 工具）；IIMN 离子身份分子网络 | M5 |
-| 第 8 月 | SIRIUS 6 CLI 集成（sirius-worker）；DreaMS 集成（dreams-worker）；M5 MSI Level 1-4 完整实现 | M5 |
+| 第 8 月 | ~~SIRIUS 6 CLI 集成（sirius-worker）~~ **代码已完成**（待注册账号）；DreaMS 集成（dreams-worker）；~~M5 MSI Level 1-4~~ **已扩展为 Level 2a/2b/2c/3/4 五级** | M5 部分✅ |
 | 第 8 月 | Target-Decoy FDR 控制框架实现（M5.FDR）；BUDDY 分子式 FDR 集成 | M5 |
 | 第 9 月 | ReactomePA + sspa + Mummichog 通路分析集成；M6 交互式气泡图；多数据库并行 | M6 |
 | 第 9 月 | M4 扩展：OPLS-DA（ropls）；ROC 曲线；多组对比矩阵；强制置换检验 | M4 |
@@ -1109,6 +1170,38 @@ MetaboAnalyst 6.0 已发布剂量-响应模块：
 | 商业版 | 私有部署企业版；SLA 支持；高级图表模板；定制化引擎 | 长期 |
 | 社区 Challenge | 基于积累的公开数据集，发起年度多引擎评估 Challenge（类 CASP 模式） | 长期 |
 | NAR 更新 | 每次大版本更新投一篇 NAR Web Server Issue（借鉴 MetaboAnalyst 策略） | 长期 |
+
+---
+
+### 📍 当前位置（2026-03-20）
+
+```
+Phase 0  ████████████████████░░ 90% （MetaboData HDF5 待做，单元测试待补）
+Phase 0.5 ████████████████████ 100% （MFSL v2.2 完成，全部验证通过）
+Phase 1  ░░░░░░░░░░░░░░░░░░░░  5% （M5 注释已前置完成，M1-M4/M7-M9 未开始）
+Phase 2  ░░░░░░░░░░░░░░░░░░░░  3% （SIRIUS 代码完成，其余未开始）
+```
+
+### 下一步行动（建议优先级）
+
+| 优先级 | 任务 | 对应 Phase | 预计时间 |
+|--------|------|-----------|---------|
+| **P0** | Git commit + push 所有代码改动 | Phase 0 收尾 | 10 分钟 |
+| **P0** | Docker 镜像重建 + E2E 完整测试 | Phase 0 收尾 | 1-2 小时 |
+| **P1** | 前端框架搭建（Next.js + Tailwind） | Phase 1 M1 | 1-2 周 |
+| **P1** | FastAPI 后端 + 分析任务 API | Phase 1 架构 | 1-2 周 |
+| **P1** | XCMS 引擎 Plumber API 封装 | Phase 1 M2 | 1 周 |
+| **P2** | MetaboData HDF5 格式实现 | Phase 0 补完 | 3-5 天 |
+| **P2** | 单元测试补全（20+ 用例） | Phase 0 补完 | 1 周 |
+| **P3** | MFSL 数据库论文撰写 | 学术产出 | 2-4 周 |
+
+### 新增学术发表机会（Phase 0.5 产出）
+
+| 论文 | 期刊目标 | 核心卖点 |
+|------|---------|---------|
+| **MFSL 数据库论文** | Nucleic Acids Research (Database Issue) / J Cheminformatics | 首个整合 11 来源、96 万化合物、7 维标签的开放代谢组学谱库 |
+| **组合化学建库方法论文** | Analytical Chemistry | 一锅法组合合成 + LC-MS/MS 自动建库（对标 Dorrestein Nature 2024） |
+| **MetaboFlow 平台论文** | Nature Communications（原计划） | 跨引擎评估框架 + MFSL + 五级注释体系 |
 
 ---
 

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "检查本轮工作是否有需要更新到产品计划书的发现（新功能、架构变更、技术决策、竞品发现）。如有，更新 docs/product-development-plan.md 和 plans/ 文件。",
+            "timeout": 30,
+            "statusMessage": "检查是否需要更新产品计划..."
+          }
+        ]
+      }
+    ]
+  }
+}

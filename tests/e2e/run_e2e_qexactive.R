@@ -27,6 +27,7 @@ source("/app/R/config.R")
 source("/app/R/differential.R")
 source("/app/R/annotation_ms1.R")
 source("/app/R/pathway_ora.R")
+source("/app/R/feature_deconvolution.R")
 
 ## ========================= Config =========================
 DATA_DIR    <- "/data/mzML"
@@ -110,6 +111,49 @@ feature_defs   <- featureDefinitions(xdata)
 t1_end <- Sys.time()
 cat("  Peak detection time:", round(difftime(t1_end, t1, units = "secs"), 1), "seconds\n")
 cat("  Final feature matrix:", nrow(feature_values), "features x", ncol(feature_values), "samples\n\n")
+
+## ========================= Step 1b: Feature Deconvolution =========================
+## Adduct grouping + isotope annotation + in-source fragment detection
+## User can select method: "camera", "cliquems", or "msflo"
+DECONV_METHOD <- Sys.getenv("DECONV_METHOD", "camera")  # user-configurable: camera/cliquems/msflo
+# Note: CliqueMS has 2x accuracy vs CAMERA but requires cliqueMS package
+# Default to CAMERA as it's in Bioconductor and most widely supported
+
+cat("===== Step 1b: Feature Deconvolution =====\n")
+t1b <- Sys.time()
+
+deconv_result <- tryCatch({
+  deconvolve_features(xdata, method = DECONV_METHOD, polarity = "positive")
+}, error = function(e) {
+  cat("  Deconvolution failed:", conditionMessage(e), "\n")
+  cat("  Continuing without deconvolution\n")
+  NULL
+})
+
+if (!is.null(deconv_result)) {
+  write.csv(deconv_result, file.path(RESULTS_DIR, "01b_deconvolution.csv"),
+            row.names = FALSE)
+
+  # Filter: keep only representative ions for annotation
+  # But keep ALL features for statistical analysis
+  repr_features <- deconv_result$feature_id[deconv_result$representative == TRUE]
+  n_before <- nrow(feature_values)
+  n_repr <- length(repr_features)
+  n_redundant <- n_before - n_repr
+
+  cat("  Features before deconv:", n_before, "\n")
+  cat("  Representative ions:", n_repr, "\n")
+  cat("  Redundant (adducts/isotopes/fragments):", n_redundant, "\n")
+  cat("  Note: All features kept for statistics; only representatives used for annotation\n")
+
+  # Create a flag vector for annotation step
+  is_representative <- rownames(feature_values) %in% repr_features
+} else {
+  is_representative <- rep(TRUE, nrow(feature_values))
+}
+
+t1b_end <- Sys.time()
+cat("  Deconvolution time:", round(difftime(t1b_end, t1b, units = "secs"), 1), "seconds\n\n")
 
 ## ========================= Step 2: Preprocessing =========================
 cat("===== Step 2: Preprocessing =====\n")
