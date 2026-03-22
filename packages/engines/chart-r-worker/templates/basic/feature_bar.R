@@ -12,9 +12,7 @@ render_feature_bar <- function(md, params) {
   library(ggplot2)
   library(dplyr)
   library(tidyr)
-  library(ggpubr)
-
-  top_n <- if (!is.null(params$top_n)) params$top_n else 8
+  top_n_val <- if (!is.null(params$top_n)) params$top_n else 8
 
   X   <- md$X
   obs <- md$obs
@@ -29,7 +27,7 @@ render_feature_bar <- function(md, params) {
     ord <- order(row_vars, decreasing = TRUE)
   }
 
-  n_sel   <- min(top_n, ncol(X))
+  n_sel   <- min(top_n_val, ncol(X))
   sel_idx <- ord[seq_len(n_sel)]
   var_sub <- var[sel_idx, , drop = FALSE]
 
@@ -61,25 +59,34 @@ render_feature_bar <- function(md, params) {
       .groups  = "drop"
     )
 
+  # Compute significance stars per feature (Wilcoxon)
   groups <- unique(obs$group)
-  comparisons <- if (length(groups) == 2) {
-    list(as.character(groups))
+  if (length(groups) == 2) {
+    pvals <- sapply(levels(df_long$feature_label), function(fl) {
+      sub <- df_long[df_long$feature_label == fl, ]
+      g1 <- sub$intensity[sub$group == groups[1]]
+      g2 <- sub$intensity[sub$group == groups[2]]
+      tryCatch(wilcox.test(g1, g2)$p.value, error = function(e) NA)
+    })
+    p_to_stars <- function(p) {
+      if (is.na(p)) "ns" else if (p < 0.001) "***" else if (p < 0.01) "**" else if (p < 0.05) "*" else "ns"
+    }
+    anno_df <- data.frame(
+      feature_label = factor(names(pvals), levels = levels(df_long$feature_label)),
+      label = sapply(pvals, p_to_stars),
+      stringsAsFactors = FALSE
+    )
+    y_pos <- df_summary |> group_by(feature_label) |> summarise(y = max(mean_int + se_int, na.rm = TRUE) * 1.15, .groups = "drop")
+    anno_df <- merge(anno_df, y_pos, by = "feature_label")
+    anno_df$x <- 1.5
   } else {
-    combn(as.character(groups), 2, simplify = FALSE)
+    anno_df <- NULL
   }
 
-  ggplot(df_summary, aes(x = group, y = mean_int, fill = group)) +
+  p <- ggplot(df_summary, aes(x = group, y = mean_int, fill = group)) +
     geom_col(width = 0.6, alpha = 0.85) +
     geom_errorbar(aes(ymin = mean_int - se_int, ymax = mean_int + se_int),
                   width = 0.2, linewidth = 0.5) +
-    ggpubr::stat_compare_means(
-      data        = df_long,
-      aes(x = group, y = intensity),
-      comparisons = comparisons,
-      method      = "wilcox.test",
-      label       = "p.signif",
-      size        = 3
-    ) +
     facet_wrap(~feature_label, scales = "free_y", ncol = 4) +
     scale_fill_metaboflow() +
     labs(
@@ -93,4 +100,10 @@ render_feature_bar <- function(md, params) {
       axis.text.x  = element_text(angle = 30, hjust = 1),
       legend.position = "none"
     )
+
+  if (!is.null(anno_df)) {
+    p <- p + geom_text(data = anno_df, aes(x = x, y = y, label = label),
+                       inherit.aes = FALSE, size = 4, color = "black")
+  }
+  p
 }
