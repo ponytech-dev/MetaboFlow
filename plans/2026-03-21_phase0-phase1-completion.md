@@ -1,60 +1,56 @@
 # Task: Phase 0 收尾 + Phase 1 核心打通
 Created: 2026-03-21
+Updated: 2026-03-21 02:50
 
 ## Objective
-完成 Phase 0 剩余工作 + Phase 1 核心数据通路打通，使系统能端到端运行（前端→后端→引擎→结果展示）。
+全栈端到端验证通过：前端上传 mzML → 后端编排 → xcms 峰检测 → stats 差异分析 → 前端展示结果
 
 ## Phases
 
-### Phase 0 收尾（今天完成）
+### Phase 0 收尾（已完成）
 
-- [ ] Step 1: Git commit + push 所有未提交代码
-  产出：6 个文件提交，无未跟踪文件
-  验证：`git status` 干净
+- [x] Step 1: Git commit + push
+- [x] Step 2: MetaboData HDF5 序列化（已有，12/12 测试通过）
+- [x] Step 3: Docker 镜像重建（含 CAMERA，2.68GB）
+- [x] Step 4: E2E Docker 测试（7 步全通，CAMERA 首次通过）
+- [x] Step 5: CHECKSUMS 更新
+- [x] Step 6: R↔Python MetaboData 桥（metabodata_bridge.R）
 
-- [ ] Step 2: MetaboData HDF5 序列化实现
-  产出：metabodata/io.py 新增 `to_hdf5()` / `from_hdf5()` 方法
-  验证：`pytest packages/common/metabodata/tests/test_io.py` 通过
+### Phase 1 数据通路打通（已完成代码，等镜像构建）
 
-- [ ] Step 3: Docker 镜像重建（含 CAMERA）
-  产出：metaboflow/qexactive:e2e 镜像构建成功
-  验证：`docker images metaboflow/qexactive` 存在
+- [x] Step 7: xcms Plumber `/run_pipeline` 输出 MetaboData HDF5
+- [x] Step 8: stats Plumber `/run_stats` 接收 MetaboData HDF5
+- [x] Step 9: annot-worker 对接 deduplicated/ 去重库
+- [x] Step 10: 后端 analysis_tasks 串联 MetaboData 流
+- [x] Step 11: 前端 Wizard → API → 结果页
+- [x] Step 12: Docker compose 全栈启动（10 服务，9 healthy）
+- [x] Step 13: Celery 任务注册 + API 端到端验证（create→upload→start→completed）
+- [x] Step 14: 文件跨容器可见（共享 /data volume）
+- [ ] Step 15: xcms-worker 安装 Bioconductor 包 ← BUILDING
+  产出：xcms-worker 能处理 mzML 文件，返回非零 features
+  验证：`curl POST /run_pipeline` → `n_features > 0`
+- [ ] Step 16: 真实 mzML 全流程端到端 ← BLOCKED by Step 15
+  产出：上传 2 mzML → 检测到 features → 差异分析 → completed
+  验证：`GET /progress` 显示 n_features > 0
 
-- [ ] Step 4: E2E 管线 Docker 测试
-  产出：4 样本全流程通过（含 Step 1b 去冗余）
-  验证：results/ 含 01-07 全部文件
+## 已修复的集成问题
 
-- [ ] Step 5: CHECKSUMS.sha256 更新
-  产出：~/spectral_libraries/CHECKSUMS.sha256
-  验证：`shasum -c` 通过
-
-### Phase 1 数据通路打通（本周目标）
-
-- [ ] Step 6: MetaboData R↔Python 序列化桥
-  产出：R 端 `write_metabodata_hdf5()` / `read_metabodata_hdf5()` 函数
-  验证：R 写 → Python 读 → 数据一致
-
-- [ ] Step 7: xcms-worker 输出 MetaboData 格式
-  产出：Plumber API 返回 MetaboData JSON/HDF5
-  验证：Python 端调用 xcms API → 得到 MetaboData 对象
-
-- [ ] Step 8: stats-worker 接收 MetaboData 格式
-  产出：Plumber API 接收 MetaboData → 返回差异分析结果
-  验证：Python 调用链 xcms → MetaboData → stats
-
-- [ ] Step 9: annot-worker 对接去重谱库
-  产出：matchms 从 deduplicated/ 加载谱库
-  验证：返回带 Sources 的匹配结果
-
-- [ ] Step 10: 后端 analysis_service 串联完整流程
-  产出：`POST /api/analysis` → xcms → stats → annot → 结果
-  验证：curl 调用 API → 返回完整分析结果
-
-- [ ] Step 11: 前端对接后端 API
-  产出：Wizard 提交 → 调后端 → 显示进度 → 展示结果
-  验证：浏览器操作完成一次分析
+| 问题 | 修复 |
+|------|------|
+| Frontend TS 类型不匹配 | 用 AnalysisConfig camelCase 属性 |
+| Next.js standalone 输出缺失 | 加 `output: 'standalone'` |
+| Celery 找不到 celery 命令 | 改为 `uv run celery` |
+| Frontend 端口 3000 被占 | 改为 `${FRONTEND_PORT:-3001}` |
+| R workers 缺 plumber（libsodium） | Dockerfile 加 `libsodium-dev` |
+| Celery 不注册 tasks | `-I app.tasks.analysis_tasks` 显式导入 |
+| _analyses 字典已被 SQLAlchemy 替代 | 改用 analysis_service API |
+| AnalysisResult 没有 config 属性 | 直接从 DB 读 config_json |
+| Path import 在使用之后 | 移到文件顶部 |
+| 上传路径 ./data vs /data | 改为绝对路径 /data/ |
+| xcms-worker 缺 Bioconductor 包 | Dockerfile 加 xcms/MSnbase/CAMERA/rhdf5 |
 
 ## Success Criteria
-- `docker-compose up` 启动全栈
-- 前端上传 mzML → 后端编排 → xcms 峰检测 → stats 差异分析 → annot 注释 → 前端展示结果
-- 数据通过 MetaboData 格式在引擎间传递（不是 R 变量直传）
+- [x] `docker compose up` 启动 10 个服务（9+ healthy）
+- [x] API 全流程 create→upload→start→completed
+- [ ] xcms-worker 处理真实 mzML 返回 features > 0 ← PENDING
+- [ ] stats-worker 返回 significant features > 0 ← PENDING
