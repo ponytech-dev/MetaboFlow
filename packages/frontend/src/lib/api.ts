@@ -6,6 +6,21 @@ import type {
   VolcanoData,
   PCAData,
 } from '@/types/analysis';
+import type {
+  Project,
+  ProjectSummary,
+  CreateProjectPayload,
+  ProjectAnalysis,
+  EngineInfo,
+  EngineParamSchema,
+  PipelineConfig,
+  ResultSummary,
+  FeatureRow,
+  AnnotationHit,
+  PathwayRow,
+  Chart,
+} from '@/types/project';
+import { authFetch } from '@/lib/auth';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -28,6 +43,16 @@ async function fetchJSON<T>(
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
   });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new ApiError(res.status, text);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Authenticated JSON fetch — auto-refreshes on 401, retries once. */
+async function authJSON<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await authFetch(`${API_BASE_URL}${path}`, options);
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new ApiError(res.status, text);
@@ -158,3 +183,155 @@ export function streamProgress(id: string): EventSource {
 }
 
 export { ApiError };
+
+// ─── Projects ────────────────────────────────────────────────────────────────
+
+export async function listProjects(): Promise<ProjectSummary[]> {
+  return authJSON<ProjectSummary[]>('/api/v1/projects');
+}
+
+export async function getProject(id: string): Promise<Project> {
+  return authJSON<Project>(`/api/v1/projects/${id}`);
+}
+
+export async function createProject(
+  payload: CreateProjectPayload
+): Promise<Project> {
+  return authJSON<Project>('/api/v1/projects', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listProjectAnalyses(
+  projectId: string
+): Promise<ProjectAnalysis[]> {
+  return authJSON<ProjectAnalysis[]>(`/api/v1/projects/${projectId}/analyses`);
+}
+
+// ─── Engines ─────────────────────────────────────────────────────────────────
+
+export async function listEngines(): Promise<EngineInfo[]> {
+  return authJSON<EngineInfo[]>('/api/v1/engines');
+}
+
+export async function getEngineParams(
+  name: string
+): Promise<EngineParamSchema> {
+  return authJSON<EngineParamSchema>(`/api/v1/engines/${name}/params`);
+}
+
+// ─── Analysis (project-scoped) ────────────────────────────────────────────────
+
+/** Create a new analysis under a project. Returns analysis id. */
+export async function createAnalysis(
+  projectId: string
+): Promise<{ id: string }> {
+  return authJSON<{ id: string }>('/api/v1/analyses', {
+    method: 'POST',
+    body: JSON.stringify({ project_id: projectId }),
+  });
+}
+
+/** Upload files for an analysis (multipart). */
+export async function uploadAnalysisFiles(
+  analysisId: string,
+  formData: FormData
+): Promise<{ file_ids: string[] }> {
+  const res = await authFetch(
+    `${API_BASE_URL}/api/v1/analyses/${analysisId}/upload`,
+    { method: 'POST', body: formData }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new ApiError(res.status, text);
+  }
+  return res.json() as Promise<{ file_ids: string[] }>;
+}
+
+/** Start analysis with pipeline config. */
+export async function startProjectAnalysis(
+  analysisId: string,
+  config: Partial<PipelineConfig>
+): Promise<{ id: string }> {
+  return authJSON<{ id: string }>(`/api/v1/analyses/${analysisId}/start`, {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+}
+
+/** Fetch result summary (counts + engine versions). */
+export async function getResultSummary(
+  analysisId: string
+): Promise<ResultSummary> {
+  return authJSON<ResultSummary>(`/api/v1/analyses/${analysisId}/result`);
+}
+
+/** Fetch feature rows with optional filters. */
+export async function getFeatures(
+  analysisId: string,
+  params?: { p_cutoff?: number; fc_cutoff?: number }
+): Promise<FeatureRow[]> {
+  const qs = params
+    ? '?' +
+      new URLSearchParams(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)])
+      ).toString()
+    : '';
+  return authJSON<FeatureRow[]>(
+    `/api/v1/analyses/${analysisId}/results/features${qs}`
+  );
+}
+
+/** Fetch annotation hits. */
+export async function getAnnotations(
+  analysisId: string
+): Promise<AnnotationHit[]> {
+  return authJSON<AnnotationHit[]>(
+    `/api/v1/analyses/${analysisId}/results/annotations`
+  );
+}
+
+/** Fetch pathway enrichment rows. */
+export async function getPathways(
+  analysisId: string
+): Promise<PathwayRow[]> {
+  return authJSON<PathwayRow[]>(
+    `/api/v1/analyses/${analysisId}/results/pathways`
+  );
+}
+
+/** Fetch chart list. */
+export async function getCharts(analysisId: string): Promise<Chart[]> {
+  return authJSON<Chart[]>(`/api/v1/analyses/${analysisId}/charts`);
+}
+
+/** Trigger chart generation. */
+export async function generateCharts(
+  analysisId: string
+): Promise<{ job_id: string }> {
+  return authJSON<{ job_id: string }>(
+    `/api/v1/analyses/${analysisId}/charts/generate`,
+    { method: 'POST' }
+  );
+}
+
+/** Trigger report generation. */
+export async function generateReport(
+  analysisId: string,
+  payload: { charts: string[]; format: 'pdf' | 'docx' | 'both' }
+): Promise<{ job_id: string }> {
+  return authJSON<{ job_id: string }>(
+    `/api/v1/analyses/${analysisId}/report/generate`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+/** Open SSE stream for pipeline progress. */
+export function streamAnalysisProgress(analysisId: string): EventSource {
+  return new EventSource(
+    `${API_BASE_URL}/api/v1/analyses/${analysisId}/progress/stream`
+  );
+}

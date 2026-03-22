@@ -23,10 +23,16 @@ export function Header() {
         {/* Nav */}
         <nav className="ml-8 flex items-center gap-6 text-sm text-muted-foreground">
           <Link
+            href="/projects"
+            className="transition-colors hover:text-foreground"
+          >
+            Projects
+          </Link>
+          <Link
             href="/analysis/new"
             className="transition-colors hover:text-foreground"
           >
-            New Analysis
+            Quick Analysis
           </Link>
           <Link href="/analyses" className="transition-colors hover:text-foreground">
             History
