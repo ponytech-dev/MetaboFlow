@@ -7,14 +7,12 @@ import string
 from datetime import datetime, timedelta, UTC
 from typing import Optional
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import InviteCode, User
-
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -22,15 +20,15 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
 # ---------------------------------------------------------------------------
-# Password helpers
+# Password helpers (using bcrypt directly — passlib incompatible with bcrypt 5.x)
 # ---------------------------------------------------------------------------
 
 def hash_password(plain: str) -> str:
-    return _pwd_ctx.hash(plain)
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_ctx.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 # ---------------------------------------------------------------------------
