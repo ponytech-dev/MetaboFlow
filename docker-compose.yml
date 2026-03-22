@@ -52,6 +52,8 @@ services:
       METABOFLOW_CHART_SERVICE_URL: http://chart-service:8005
       METABOFLOW_ANNOT_WORKER_URL: http://annot-worker:8006
       METABOFLOW_SIRIUS_WORKER_URL: http://sirius-worker:8007
+      METABOFLOW_CHART_R_WORKER_URL: http://chart-r-worker:8008
+      METABOFLOW_REPORT_WORKER_URL: http://report-worker:8009
       METABOFLOW_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3005"]'
     volumes:
       - ./data:/data
@@ -82,6 +84,8 @@ services:
       METABOFLOW_STATS_WORKER_URL: http://stats-worker:8002
       METABOFLOW_ANNOT_WORKER_URL: http://annot-worker:8006
       METABOFLOW_SIRIUS_WORKER_URL: http://sirius-worker:8007
+      METABOFLOW_CHART_R_WORKER_URL: http://chart-r-worker:8008
+      METABOFLOW_REPORT_WORKER_URL: http://report-worker:8009
     volumes:
       - ./data:/data
     depends_on:

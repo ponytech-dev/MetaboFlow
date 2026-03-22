@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     msdial_worker_url: str = "http://localhost:8004"
     annot_worker_url: str = "http://localhost:8006"
     sirius_worker_url: str = "http://localhost:8007"
+    chart_r_worker_url: str = "http://localhost:8008"
+    report_worker_url: str = "http://localhost:8009"
 
     model_config = {"env_prefix": "METABOFLOW_"}
 
