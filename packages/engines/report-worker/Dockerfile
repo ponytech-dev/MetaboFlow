@@ -2,7 +2,8 @@ FROM rocker/r-ver:4.4.2
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2-dev libxml2-dev libcurl4-openssl-dev libssl-dev \
-    libsodium-dev libfontconfig1-dev wget pandoc && \
+    libsodium-dev libfontconfig1-dev libfreetype6-dev libpng-dev \
+    libtiff5-dev libjpeg-dev libharfbuzz-dev libfribidi-dev wget pandoc && \
     ARCH=$(dpkg --print-architecture) && \
     wget -qO /tmp/quarto.deb "https://github.com/quarto-dev/quarto-cli/releases/download/v1.6.40/quarto-1.6.40-linux-${ARCH}.deb" && \
     dpkg -i /tmp/quarto.deb && rm /tmp/quarto.deb && \

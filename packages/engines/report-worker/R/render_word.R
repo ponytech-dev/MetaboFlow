@@ -20,7 +20,7 @@ render_word_report <- function(metabodata_path, chart_dir, output_dir,
   summary_df <- data.frame(
     Metric = c("Samples", "Features Detected", "Significant Features", "Groups"),
     Value = c(nrow(md$obs), ncol(md$X),
-              sum(md$var$significant, na.rm = TRUE),
+              sum(as.logical(md$var$significant), na.rm = TRUE),
               paste(unique(md$obs$group), collapse = " vs "))
   )
   ft <- flextable(summary_df)
@@ -45,7 +45,7 @@ render_word_report <- function(metabodata_path, chart_dir, output_dir,
   # Section 3: Top Features Table
   doc <- body_add_par(doc, "3. Top Significant Features", style = "heading 2")
   if (!is.null(md$var$pvalue) && !is.null(md$var$logFC)) {
-    sig <- md$var[md$var$significant == TRUE, , drop = FALSE]
+    sig <- md$var[as.logical(md$var$significant) == TRUE, , drop = FALSE]
     if (nrow(sig) > 0) {
       top <- head(sig[order(sig$pvalue), ], 20)
       cols <- intersect(c("feature_id", "mz", "rt", "logFC", "pvalue"), names(top))
