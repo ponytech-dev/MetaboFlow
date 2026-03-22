@@ -51,12 +51,14 @@
 
 ### 图表模板系统
 
-- 50 种模板：20 基础（高频必做）+ 30 高级（多变量复合）
+- 50 种模板：20 基础（B01-B20）+ 30 高级（A01-A30），完整目录见 `docs/chart-template-catalog.md`
 - 调研来源：Nature/Science 正刊+子刊 2020-2026 代谢组学论文
-- R 端渲染（ggplot2 + ComplexHeatmap），统一 Nature 风格配色
+- R 端渲染（ggplot2 + ComplexHeatmap + EnhancedVolcano + patchwork）
+- 统一 Nature 风格配色（NPG 色板，色盲友好）
 - 每种图表附中英文解读说明
-- 一键出图，发表级质量（SVG/PDF/PNG）
-- 数据源分类（A/B/C/D）+ 筛选敏感性标注
+- 一键出图，发表级质量（SVG/PDF/PNG 300dpi）
+- 数据源分类：26 个 A 类（直接可用）、9 个 B 类、4 个 C 类、2+8 个 D 类
+- 筛选敏感性：34 个 filter-sensitive、16 个 global
 
 ### 报告导出
 
