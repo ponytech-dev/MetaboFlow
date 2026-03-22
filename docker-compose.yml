@@ -185,6 +185,42 @@ services:
       timeout: 5s
       retries: 3
 
+  # ── Chart R Worker ───────────────────────────────────────────────────────
+
+  chart-r-worker:
+    build:
+      context: ./packages/engines/chart-r-worker
+    image: metaboflow/chart-r-worker:0.1.0
+    container_name: metaboflow-chart-r-worker
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    expose:
+      - "8008"
+    healthcheck:
+      test: ["CMD", "Rscript", "-e", "con <- url('http://localhost:8008/health'); r <- readLines(con, warn=FALSE); close(con); if(length(r)==0) quit(status=1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Report Worker ───────────────────────────────────────────────────────
+
+  report-worker:
+    build:
+      context: ./packages/engines/report-worker
+    image: metaboflow/report-worker:0.1.0
+    container_name: metaboflow-report-worker
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    expose:
+      - "8009"
+    healthcheck:
+      test: ["CMD", "Rscript", "-e", "con <- url('http://localhost:8009/health'); r <- readLines(con, warn=FALSE); close(con); if(length(r)==0) quit(status=1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # ── Frontend ─────────────────────────────────────────────────────────────
 
   frontend:
