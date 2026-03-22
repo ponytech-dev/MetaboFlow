@@ -141,6 +141,28 @@ def update_progress(
         repo.update_progress(analysis_id, patch)
 
 
+def update_result(
+    analysis_id: str,
+    *,
+    n_features: int = 0,
+    n_significant: int = 0,
+    n_annotated: int = 0,
+    n_pathways: int = 0,
+    result_files: list[str] | None = None,
+    metabodata_path: str | None = None,
+) -> None:
+    """Write analysis results to DB (called by Celery tasks after each step)."""
+    with _session() as repo:
+        repo.update_result(analysis_id, {
+            "n_features": n_features,
+            "n_significant": n_significant,
+            "n_annotated": n_annotated,
+            "n_pathways": n_pathways,
+            "result_files": result_files or [],
+            "metabodata_path": metabodata_path,
+        })
+
+
 def list_analyses() -> list[AnalysisProgress]:
     """List all analyses using a single session."""
     with _session() as repo:

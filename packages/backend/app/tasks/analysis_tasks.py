@@ -120,6 +120,11 @@ def _run_peak_detection(analysis_id: str, config, upload_dir: str, results_dir: 
     if runtime["n_features"] == 0:
         raise RuntimeError("Peak detection returned 0 features — check xcms-worker logs")
     logger.info("Peak detection for %s: %d features", analysis_id, runtime["n_features"])
+    analysis_service.update_result(
+        analysis_id,
+        n_features=runtime["n_features"],
+        metabodata_path=runtime["metabodata_path"],
+    )
 
 
 def _run_statistics(analysis_id: str, config, results_dir: str, runtime: dict) -> None:
@@ -151,6 +156,10 @@ def _run_statistics(analysis_id: str, config, results_dir: str, runtime: dict) -
     n_sig = result.get("n_significant", 0)
     runtime["n_significant"] = n_sig[0] if isinstance(n_sig, list) else n_sig
     logger.info("Statistics for %s: %d significant", analysis_id, runtime["n_significant"])
+    analysis_service.update_result(
+        analysis_id,
+        n_significant=runtime["n_significant"],
+    )
 
 
 def _run_annotation(analysis_id: str, config, results_dir: str, runtime: dict) -> None:
