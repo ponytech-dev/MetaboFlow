@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
 
+    # Auth
+    secret_key: str = "metaboflow-dev-secret-change-in-production"
+
     # File storage
     upload_dir: str = "/data/uploads"
     results_dir: str = "/data/results"

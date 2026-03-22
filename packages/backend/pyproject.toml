@@ -19,6 +19,9 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.1",
     "h5py>=3.10",
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.5.0",
+    "email-validator>=2.3.0",
 ]
 
 [project.optional-dependencies]
