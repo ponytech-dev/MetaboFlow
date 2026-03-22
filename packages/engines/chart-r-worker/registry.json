@@ -1,0 +1,93 @@
+{
+  "version": "1.0",
+  "templates": [
+    {
+      "id": "volcano_plot",
+      "name": "Volcano Plot",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": true,
+      "r_packages": ["EnhancedVolcano", "ggplot2"]
+    },
+    {
+      "id": "pca_score",
+      "name": "PCA Score Plot",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false,
+      "r_packages": ["ggplot2", "factoextra"]
+    },
+    {
+      "id": "heatmap_clustered",
+      "name": "Clustered Heatmap",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": true,
+      "r_packages": ["ComplexHeatmap"]
+    },
+    {
+      "id": "boxplot_top",
+      "name": "Top Features Boxplot",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": true,
+      "r_packages": ["ggplot2", "ggpubr"]
+    },
+    {
+      "id": "mzrt_cloud",
+      "name": "mz-RT Scatter Plot",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false,
+      "r_packages": ["ggplot2"]
+    },
+    {
+      "id": "qc_intensity",
+      "name": "QC Intensity Boxplot",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false,
+      "r_packages": ["ggplot2"]
+    },
+    {
+      "id": "rsd_distribution",
+      "name": "RSD Distribution",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false,
+      "r_packages": ["ggplot2"]
+    },
+    {
+      "id": "correlation_heatmap",
+      "name": "Sample Correlation Heatmap",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false,
+      "r_packages": ["ComplexHeatmap", "corrplot"]
+    },
+    {
+      "id": "feature_bar",
+      "name": "Feature Intensity Bar Chart",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": true,
+      "r_packages": ["ggplot2", "ggpubr"]
+    },
+    {
+      "id": "hexbin_density",
+      "name": "Hexbin Density Plot",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false,
+      "r_packages": ["ggplot2"]
+    },
+    {
+      "id": "missing_heatmap",
+      "name": "Missing Value Heatmap",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false,
+      "r_packages": ["ggplot2", "ComplexHeatmap"]
+    }
+  ]
+}
