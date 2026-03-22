@@ -1,0 +1,36 @@
+---
+title: "MetaboFlow Analysis Report"
+format:
+  pdf:
+    documentclass: article
+    geometry: margin=1in
+    fontsize: 11pt
+---
+
+```{r setup, include=FALSE}
+library(jsonlite)
+data <- fromJSON("report_data.json")
+```
+
+## 1. Analysis Summary
+
+| Metric | Value |
+|--------|-------|
+| Samples | `r data$n_samples` |
+| Features | `r data$n_features` |
+| Significant | `r data$n_significant` |
+| Groups | `r data$groups` |
+
+## 2. Figures
+
+```{r charts, echo=FALSE, results='asis', fig.align='center'}
+for (cf in data$chart_files) {
+  chart_name <- tools::file_path_sans_ext(basename(cf))
+  cat(sprintf("\n### %s\n\n", chart_name))
+  cat(sprintf("![%s](%s){width=90%%}\n\n", chart_name, cf))
+}
+```
+
+## 3. Methods
+
+`r data$methods_text`
