@@ -1,14 +1,16 @@
-"""Analysis API routes."""
+"""Analysis API routes with user_id data isolation."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
+from app.middleware.auth import get_optional_user
+from app.db.models import User
 from app.models.analysis import (
     AnalysisConfig,
     AnalysisProgress,
@@ -19,19 +21,42 @@ from app.services import analysis_service
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
 
+def _verify_ownership(analysis_id: str, user: Optional[User]) -> None:
+    """Verify the current user owns this analysis. Skip if no auth."""
+    if user is None:
+        return
+    from app.db.base import SessionLocal
+    from app.db.models import Analysis
+    session = SessionLocal()
+    try:
+        record = session.query(Analysis).filter_by(id=analysis_id).first()
+        if record is None:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        if record.user_id is not None and record.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    finally:
+        session.close()
+
+
 @router.post("", response_model=dict)
-async def create_analysis(config: AnalysisConfig) -> dict:
+async def create_analysis(
+    config: AnalysisConfig,
+    user: Optional[User] = Depends(get_optional_user),
+) -> dict:
     """Create a new analysis pipeline run."""
-    analysis_id = analysis_service.create_analysis(config)
+    user_id = user.id if user else None
+    analysis_id = analysis_service.create_analysis(config, user_id=user_id)
     return {"analysis_id": analysis_id, "message": "Analysis created"}
 
 
 @router.post("/{analysis_id}/upload")
-async def upload_files(analysis_id: str, files: list[UploadFile]) -> dict:
+async def upload_files(
+    analysis_id: str,
+    files: list[UploadFile],
+    user: Optional[User] = Depends(get_optional_user),
+) -> dict:
     """Upload mzML/mzXML files for an analysis."""
-    progress = analysis_service.get_progress(analysis_id)
-    if progress is None:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    _verify_ownership(analysis_id, user)
 
     upload_dir = analysis_service.get_upload_dir(analysis_id)
     if upload_dir is None:
@@ -51,19 +76,20 @@ async def upload_files(analysis_id: str, files: list[UploadFile]) -> dict:
 
 
 @router.post("/{analysis_id}/start")
-async def start_analysis(analysis_id: str) -> dict:
+async def start_analysis(
+    analysis_id: str,
+    user: Optional[User] = Depends(get_optional_user),
+) -> dict:
     """Start the analysis pipeline (dispatches Celery task)."""
+    _verify_ownership(analysis_id, user)
+
     progress = analysis_service.get_progress(analysis_id)
     if progress is None:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
-    # Import here to avoid circular imports at module level
     from app.tasks.analysis_tasks import run_analysis_pipeline
-
-    # Retrieve config from DB and pass to Celery task
     from app.db.base import SessionLocal
     from app.db.models import Analysis
-    import json
 
     session = SessionLocal()
     try:
@@ -77,8 +103,12 @@ async def start_analysis(analysis_id: str) -> dict:
 
 
 @router.get("/{analysis_id}/progress", response_model=AnalysisProgress)
-async def get_progress(analysis_id: str) -> AnalysisProgress:
+async def get_progress(
+    analysis_id: str,
+    user: Optional[User] = Depends(get_optional_user),
+) -> AnalysisProgress:
     """Get current analysis progress."""
+    _verify_ownership(analysis_id, user)
     progress = analysis_service.get_progress(analysis_id)
     if progress is None:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -86,8 +116,12 @@ async def get_progress(analysis_id: str) -> AnalysisProgress:
 
 
 @router.get("/{analysis_id}/progress/stream")
-async def stream_progress(analysis_id: str) -> EventSourceResponse:
+async def stream_progress(
+    analysis_id: str,
+    user: Optional[User] = Depends(get_optional_user),
+) -> EventSourceResponse:
     """SSE stream for real-time analysis progress updates."""
+    _verify_ownership(analysis_id, user)
 
     async def event_generator() -> AsyncGenerator[dict, None]:
         last_pct = -1.0
@@ -111,8 +145,12 @@ async def stream_progress(analysis_id: str) -> EventSourceResponse:
 
 
 @router.get("/{analysis_id}/result", response_model=AnalysisResult)
-async def get_result(analysis_id: str) -> AnalysisResult:
+async def get_result(
+    analysis_id: str,
+    user: Optional[User] = Depends(get_optional_user),
+) -> AnalysisResult:
     """Get analysis results."""
+    _verify_ownership(analysis_id, user)
     result = analysis_service.get_result(analysis_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -120,6 +158,9 @@ async def get_result(analysis_id: str) -> AnalysisResult:
 
 
 @router.get("", response_model=list[AnalysisProgress])
-async def list_analyses() -> list[AnalysisProgress]:
-    """List all analyses."""
-    return analysis_service.list_analyses()
+async def list_analyses(
+    user: Optional[User] = Depends(get_optional_user),
+) -> list[AnalysisProgress]:
+    """List analyses for current user."""
+    user_id = user.id if user else None
+    return analysis_service.list_analyses(user_id=user_id)

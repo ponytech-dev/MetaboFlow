@@ -43,6 +43,19 @@ def get_current_user(
     return user
 
 
+def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """Return User if valid token present, None otherwise (no 401)."""
+    if credentials is None:
+        return None
+    user_id = auth_service.verify_token(credentials.credentials, "access")
+    if user_id is None:
+        return None
+    return db.query(User).filter(User.id == user_id).first()
+
+
 def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
     """Require an admin user."""
     if not current_user.is_admin:

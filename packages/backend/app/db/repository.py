@@ -49,6 +49,7 @@ class AnalysisRepository:
         config: Any,
         upload_dir: str,
         results_dir: str,
+        user_id: str | None = None,
     ) -> Analysis:
         """Persist a new Analysis row and return it."""
         initial_progress = {
@@ -81,6 +82,7 @@ class AnalysisRepository:
             ),
             upload_dir=upload_dir,
             results_dir=results_dir,
+            user_id=user_id,
         )
         self._db.add(row)
         self._db.commit()
@@ -125,8 +127,11 @@ class AnalysisRepository:
         self._db.refresh(row)
         return row
 
-    def list_all(self) -> list[Analysis]:
-        return self._db.query(Analysis).order_by(Analysis.created_at.desc()).all()
+    def list_all(self, user_id: str | None = None) -> list[Analysis]:
+        q = self._db.query(Analysis)
+        if user_id is not None:
+            q = q.filter(Analysis.user_id == user_id)
+        return q.order_by(Analysis.created_at.desc()).all()
 
     def delete(self, analysis_id: str) -> bool:
         row = self.get_by_id(analysis_id)

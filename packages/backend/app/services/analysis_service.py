@@ -39,7 +39,7 @@ def _session() -> Generator[AnalysisRepository, None, None]:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-def create_analysis(config: AnalysisConfig) -> str:
+def create_analysis(config: AnalysisConfig, user_id: str | None = None) -> str:
     """Create a new analysis and return its 8-character ID."""
     analysis_id = str(uuid.uuid4())[:8]
 
@@ -55,6 +55,7 @@ def create_analysis(config: AnalysisConfig) -> str:
             config=config,
             upload_dir=str(upload_dir),
             results_dir=str(results_dir),
+            user_id=user_id,
         )
     return analysis_id
 
@@ -163,10 +164,10 @@ def update_result(
         })
 
 
-def list_analyses() -> list[AnalysisProgress]:
+def list_analyses(user_id: str | None = None) -> list[AnalysisProgress]:
     """List all analyses using a single session."""
     with _session() as repo:
-        rows = repo.list_all()
+        rows = repo.list_all(user_id=user_id)
         result = []
         for row in rows:
             data = repo.get_progress_dict(row.id)
