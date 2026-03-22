@@ -1,93 +1,356 @@
 {
   "version": "1.0",
+  "total": 50,
   "templates": [
+    {
+      "id": "boxplot_top",
+      "name": "Boxplot Top",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "bpc_comparison",
+      "name": "Bpc Comparison",
+      "category": "basic",
+      "data_source": "C",
+      "filter_sensitive": false
+    },
+    {
+      "id": "correlation_heatmap",
+      "name": "Correlation Heatmap",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "eic_plot",
+      "name": "Eic Plot",
+      "category": "basic",
+      "data_source": "C",
+      "filter_sensitive": false
+    },
+    {
+      "id": "feature_bar",
+      "name": "Feature Bar",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "heatmap_clustered",
+      "name": "Heatmap Clustered",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "hexbin_density",
+      "name": "Hexbin Density",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "missing_heatmap",
+      "name": "Missing Heatmap",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "ms2_mirror",
+      "name": "Ms2 Mirror",
+      "category": "basic",
+      "data_source": "C",
+      "filter_sensitive": false
+    },
+    {
+      "id": "mzrt_cloud",
+      "name": "Mzrt Cloud",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "pathway_bar",
+      "name": "Pathway Bar",
+      "category": "basic",
+      "data_source": "D",
+      "filter_sensitive": false
+    },
+    {
+      "id": "pathway_bubble",
+      "name": "Pathway Bubble",
+      "category": "basic",
+      "data_source": "D",
+      "filter_sensitive": false
+    },
+    {
+      "id": "pca_loading",
+      "name": "Pca Loading",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "pca_score",
+      "name": "Pca Score",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "plsda_score",
+      "name": "Plsda Score",
+      "category": "basic",
+      "data_source": "B",
+      "filter_sensitive": false
+    },
+    {
+      "id": "qc_intensity",
+      "name": "Qc Intensity",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "rsd_distribution",
+      "name": "Rsd Distribution",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "tic_overlay",
+      "name": "Tic Overlay",
+      "category": "basic",
+      "data_source": "C",
+      "filter_sensitive": false
+    },
+    {
+      "id": "upset_plot",
+      "name": "Upset Plot",
+      "category": "basic",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
     {
       "id": "volcano_plot",
       "name": "Volcano Plot",
       "category": "basic",
       "data_source": "A",
-      "filter_sensitive": true,
-      "r_packages": ["EnhancedVolcano", "ggplot2"]
+      "filter_sensitive": false
     },
     {
-      "id": "pca_score",
-      "name": "PCA Score Plot",
-      "category": "basic",
-      "data_source": "A",
-      "filter_sensitive": false,
-      "r_packages": ["ggplot2", "factoextra"]
+      "id": "analysis_dashboard",
+      "name": "Analysis Dashboard",
+      "category": "advanced",
+      "data_source": "A+D",
+      "filter_sensitive": true
     },
     {
-      "id": "heatmap_clustered",
-      "name": "Clustered Heatmap",
-      "category": "basic",
-      "data_source": "A",
-      "filter_sensitive": true,
-      "r_packages": ["ComplexHeatmap"]
+      "id": "annotated_heatmap",
+      "name": "Annotated Heatmap",
+      "category": "advanced",
+      "data_source": "A+D",
+      "filter_sensitive": true
     },
     {
-      "id": "boxplot_top",
-      "name": "Top Features Boxplot",
-      "category": "basic",
+      "id": "arc_diagram",
+      "name": "Arc Diagram",
+      "category": "advanced",
       "data_source": "A",
-      "filter_sensitive": true,
-      "r_packages": ["ggplot2", "ggpubr"]
+      "filter_sensitive": true
     },
     {
-      "id": "mzrt_cloud",
-      "name": "mz-RT Scatter Plot",
-      "category": "basic",
-      "data_source": "A",
-      "filter_sensitive": false,
-      "r_packages": ["ggplot2"]
+      "id": "chemrich_enrichment",
+      "name": "Chemrich Enrichment",
+      "category": "advanced",
+      "data_source": "D",
+      "filter_sensitive": true
     },
     {
-      "id": "qc_intensity",
-      "name": "QC Intensity Boxplot",
-      "category": "basic",
-      "data_source": "A",
-      "filter_sensitive": false,
-      "r_packages": ["ggplot2"]
+      "id": "compound_id_card",
+      "name": "Compound Id Card",
+      "category": "advanced",
+      "data_source": "C+D",
+      "filter_sensitive": true
     },
     {
-      "id": "rsd_distribution",
-      "name": "RSD Distribution",
-      "category": "basic",
+      "id": "contour_scatter",
+      "name": "Contour Scatter",
+      "category": "advanced",
       "data_source": "A",
-      "filter_sensitive": false,
-      "r_packages": ["ggplot2"]
+      "filter_sensitive": false
     },
     {
-      "id": "correlation_heatmap",
-      "name": "Sample Correlation Heatmap",
-      "category": "basic",
+      "id": "dual_volcano",
+      "name": "Dual Volcano",
+      "category": "advanced",
       "data_source": "A",
-      "filter_sensitive": false,
-      "r_packages": ["ComplexHeatmap", "corrplot"]
+      "filter_sensitive": true
     },
     {
-      "id": "feature_bar",
-      "name": "Feature Intensity Bar Chart",
-      "category": "basic",
+      "id": "enhanced_volcano_annotated",
+      "name": "Enhanced Volcano Annotated",
+      "category": "advanced",
       "data_source": "A",
-      "filter_sensitive": true,
-      "r_packages": ["ggplot2", "ggpubr"]
+      "filter_sensitive": true
     },
     {
-      "id": "hexbin_density",
-      "name": "Hexbin Density Plot",
-      "category": "basic",
+      "id": "forest_plot",
+      "name": "Forest Plot",
+      "category": "advanced",
       "data_source": "A",
-      "filter_sensitive": false,
-      "r_packages": ["ggplot2"]
+      "filter_sensitive": true
     },
     {
-      "id": "missing_heatmap",
-      "name": "Missing Value Heatmap",
-      "category": "basic",
+      "id": "isotope_tracing",
+      "name": "Isotope Tracing",
+      "category": "advanced",
+      "data_source": "B",
+      "filter_sensitive": true
+    },
+    {
+      "id": "isotope_verification",
+      "name": "Isotope Verification",
+      "category": "advanced",
       "data_source": "A",
-      "filter_sensitive": false,
-      "r_packages": ["ggplot2", "ComplexHeatmap"]
+      "filter_sensitive": true
+    },
+    {
+      "id": "kegg_overlay",
+      "name": "Kegg Overlay",
+      "category": "advanced",
+      "data_source": "D",
+      "filter_sensitive": true
+    },
+    {
+      "id": "metabolite_phenotype",
+      "name": "Metabolite Phenotype",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": true
+    },
+    {
+      "id": "mfuzz_temporal",
+      "name": "Mfuzz Temporal",
+      "category": "advanced",
+      "data_source": "B",
+      "filter_sensitive": false
+    },
+    {
+      "id": "molecular_network",
+      "name": "Molecular Network",
+      "category": "advanced",
+      "data_source": "B+D",
+      "filter_sensitive": true
+    },
+    {
+      "id": "multi_contrast_bubble",
+      "name": "Multi Contrast Bubble",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": true
+    },
+    {
+      "id": "multi_omics_heatmap",
+      "name": "Multi Omics Heatmap",
+      "category": "advanced",
+      "data_source": "A+D",
+      "filter_sensitive": true
+    },
+    {
+      "id": "oplsda_dual",
+      "name": "Oplsda Dual",
+      "category": "advanced",
+      "data_source": "B",
+      "filter_sensitive": true
+    },
+    {
+      "id": "parallel_coords",
+      "name": "Parallel Coords",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": true
+    },
+    {
+      "id": "qc_dashboard",
+      "name": "Qc Dashboard",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "rf_importance",
+      "name": "Rf Importance",
+      "category": "advanced",
+      "data_source": "B",
+      "filter_sensitive": true
+    },
+    {
+      "id": "ridge_plot",
+      "name": "Ridge Plot",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "roc_curve",
+      "name": "Roc Curve",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": true
+    },
+    {
+      "id": "sankey_annotation",
+      "name": "Sankey Annotation",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": false
+    },
+    {
+      "id": "scatter_marginal",
+      "name": "Scatter Marginal",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": true
+    },
+    {
+      "id": "treemap_classes",
+      "name": "Treemap Classes",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": true
+    },
+    {
+      "id": "vip_lollipop",
+      "name": "Vip Lollipop",
+      "category": "advanced",
+      "data_source": "B",
+      "filter_sensitive": true
+    },
+    {
+      "id": "volcano_pathway_dual",
+      "name": "Volcano Pathway Dual",
+      "category": "advanced",
+      "data_source": "A+D",
+      "filter_sensitive": true
+    },
+    {
+      "id": "waterfall_chart",
+      "name": "Waterfall Chart",
+      "category": "advanced",
+      "data_source": "A",
+      "filter_sensitive": true
+    },
+    {
+      "id": "wgcna_module",
+      "name": "Wgcna Module",
+      "category": "advanced",
+      "data_source": "B",
+      "filter_sensitive": true
     }
   ]
 }
