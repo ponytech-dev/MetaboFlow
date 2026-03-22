@@ -3,7 +3,7 @@
 # Run from the MetaboFlow repo root: bash deploy/deploy.sh
 set -euo pipefail
 
-DOMAIN="${METABOFLOW_DOMAIN:-ponytech.dev}"
+DOMAIN="${METABOFLOW_DOMAIN:-metaboflow.ponytech.dev}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-jiajunagent@gmail.com}"
 SECRET_KEY=$(openssl rand -hex 32)
 

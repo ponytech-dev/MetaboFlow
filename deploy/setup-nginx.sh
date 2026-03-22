@@ -3,7 +3,7 @@
 # Run as root or with sudo
 set -euo pipefail
 
-DOMAIN="${METABOFLOW_DOMAIN:-ponytech.dev}"
+DOMAIN="${METABOFLOW_DOMAIN:-metaboflow.ponytech.dev}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-jiajunagent@gmail.com}"
 
 echo "=== Nginx + SSL Setup ==="
