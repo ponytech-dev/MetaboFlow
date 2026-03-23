@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/ponytech-dev/MetaboFlow/main/deploy
 cd /opt/metaboflow
 git clone https://github.com/ponytech-dev/MetaboFlow.git .
 export METABOFLOW_DOMAIN=ponytech.dev
-export ADMIN_EMAIL=jiajunagent@gmail.com
+export ADMIN_EMAIL=<agent-email>
 bash deploy/deploy.sh
 ```
 
@@ -32,7 +32,7 @@ First build takes 15-30 minutes (R packages compilation).
 
 ```bash
 export METABOFLOW_DOMAIN=ponytech.dev
-export ADMIN_EMAIL=jiajunagent@gmail.com
+export ADMIN_EMAIL=<agent-email>
 sudo bash deploy/setup-nginx.sh
 ```
 
@@ -40,7 +40,7 @@ sudo bash deploy/setup-nginx.sh
 
 - Frontend: https://ponytech.dev
 - API docs: https://ponytech.dev/docs
-- Admin: jiajunagent@gmail.com / MetaboFlow2026! (change after first login)
+- Admin: <agent-email> / MetaboFlow2026! (change after first login)
 
 ## Server Requirements
 

@@ -4,6 +4,9 @@
 
 **非靶向代谢组学四工作流集成分析系统**
 
+[![R](https://img.shields.io/badge/R-%E2%89%A54.5.0-276DC3.svg)](https://cran.r-project.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 ---
 
 ## Overview / 概述
@@ -223,6 +226,19 @@ example_results/
 ├── 05_boxplot/                # Representative metabolite boxplots (10 of 183)
 └── 06_summary/                # Run parameter summary
 ```
+
+## Ponytech Ecosystem / 生态系统
+
+| Project | Description |
+|---------|-------------|
+| [PonyMemory](https://github.com/ponytech-dev/ponymemory) | Autonomous 5-tier memory for AI agents |
+| [PonyWriterX](https://github.com/ponytech-dev/ponywriterX) | AI scientific writing platform |
+| [PonylabASMS](https://github.com/ponytech-dev/ponylabASMS) | Mass spectrometry analysis |
+| [PonyLab](https://github.com/ponytech-dev/ponylab) | AI-native LIMS + ELN |
+| [SpaFlow](https://github.com/ponytech-dev/spaflow) | SPA business management |
+| [MetaboFlow](https://github.com/ponytech-dev/MetaboFlow) | Metabolomics pipeline |
+
+---
 
 ## License / 许可证
 
