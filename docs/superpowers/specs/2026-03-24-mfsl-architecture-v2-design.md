@@ -9,41 +9,61 @@
 
 ## 1. 总体架构
 
-MFSL（MetaboFlow Spectral Library）是一个独立的数据资产，由两个核心库组成。两个库各自拥有完整的 8 维标签体系，通过 InChIKey 关联但不互相依赖。
+MFSL（MetaboFlow Spectral Library）是一个独立的数据资产，由两个核心库组成，服务于分层注释流程中的不同环节。
 
-### 1.1 三层结构
-
-```
-Layer 1: 数据层
-  ├── deduplicated/*.msp           质谱库：60 万条 MS2 谱图峰数据（标签内嵌）
-  └── compound_metadata.csv        化合物库：127 万条化合物属性（= Level 3 数据）
-
-Layer 2: 索引层
-  └── spectral_metadata.csv        质谱库的只读快速索引（从 MSP 自动生成）
-
-Layer 3: 文档层
-  └── DATABASE_MANUAL.md           来源清单 + 构建方法 + 架构说明
-```
-
-### 1.2 双库关系
+### 1.1 双库结构
 
 ```
-质谱库 (Level 2)                          化合物库 (Level 3)
+质谱库 (Level 2 数据)                     化合物库 (Level 3 数据)
 deduplicated/*.msp                        compound_metadata.csv
-  60 万条谱图                                127 万条化合物（覆盖所有谱图化合物）
-  每条内嵌 8 维标签                           每条有 8 维标签
-  数据：peaks（碎裂谱图）                     数据：exact_mass（精确质量）
-  用途：MS2 谱图匹配                          用途：MS1 精确质量匹配
-           │                                         │
-           └──── InChIKey（前 14 位）────────────────┘
-                    增值关联，非必须依赖
+  60 万条 MS2 谱图                          127 万条化合物
+  每条内嵌 8 维标签                          每条有 8 维标签
+  数据内容：碎裂峰（mz + intensity）         数据内容：精确质量 + SMILES + 交叉引用
+  用途：Level 2 MS2 谱图匹配                用途：Level 3 MS1 匹配 + 元数据富集
+
+  另附：DATABASE_MANUAL.md               （来源清单 + 构建方法 + 架构说明）
 ```
 
-**核心原则：**
-- 两个库各自独立——质谱库的标签不依赖化合物库查询，化合物库的标签不依赖质谱库
-- InChIKey 关联是增值查询——有就补充更多信息，没有也不影响基础标签和搜索
-- 标签内嵌 MSP 文件——行业标准做法（MassBank/GNPS/MoNA/FragHub 均如此）
-- spectral_metadata.csv 是 MSP 的衍生物——从 MSP 文件自动生成，不是数据源
+**两个库各自独立，各自拥有完整的 8 维标签。** 搜索时各自按标签过滤，不依赖对方。
+
+### 1.2 元数据富集：两个库如何协同
+
+质谱库和化合物库在注释流程中各司其职，但在**结果输出阶段**需要协同——Level 2 谱图匹配命中后，仅凭 MSP 文件里的信息（compound_name + InChIKey + score）不足以支撑下游通路分析（缺 KEGG ID）和结果报告（缺化学分类细节）。这是行业共同痛点：MetaboAnalystR 4.0 用本地 SQLite 解决，XCMS Online 依托 METLIN，多数工具需要用户手动做 ID 转换。
+
+**MetaboFlow 的方案：compound_metadata.csv 承担元数据富集角色。** 具体关联机制：
+
+1. **主关联键：InChIKey**（完整 27 位优先，前 14 位退化匹配）
+   - 覆盖率：MSP 谱图中 95.8% 有 InChIKey
+   - compound_metadata 已包含所有谱图化合物（100% 前 14 位匹配）
+
+2. **补充关联键**（用于 InChIKey 缺失的 25,274 条谱图）
+   - HMDB ID：50% 的无 InChIKey 谱图有 HMDB ID（12,651 条），compound_metadata 有 hmdb_id 字段
+   - CAS 号：29% 有 CAS（7,206 条），compound_metadata 有 cas_number 字段
+   - 关联优先级：InChIKey 27 位 → InChIKey 14 位 → HMDB ID → CAS 号
+
+3. **富集内容**：从 compound_metadata 获取的信息
+   - KEGG ID → 支撑通路富集分析（ORA/GSEA）
+   - HMDB ID → 支撑 MetaboAnalyst 兼容
+   - 详细化学分类（chemical_class、application、sample）→ 结果报告和图表
+   - SMILES → 结构展示
+   - reg_lists → 环境筛查报告
+
+4. **富集不是搜索的前置条件**——搜索阶段（Level 2/3）各自独立完成，富集在搜索完成后执行。搜索性能不受富集步骤影响。
+
+### 1.3 标签与 MSP 原有字段的共存
+
+MSP 文件中原有的字段（Ion_mode、Instrument_type、Spectrum_type 等）与八维标签存在部分重复：
+
+| MSP 原有字段 | 八维标签 | 处理方式 |
+|------------|---------|---------|
+| `Ion_mode: POSITIVE` | `Polarity: positive` | 原有字段保留（向后兼容），标签字段为规范化值，搜索用标签字段 |
+| `Instrument_type: LC-ESI-ITFT` | `Instrument: orbitrap` | 原有字段保留原始值，标签字段为归一化类别 |
+| `Spectrum_type: Predicted` | `Confidence: predicted` | 同上 |
+| `Sources: massbank.msp; hmdb.msp` | （source 维度从 Sources 字段提取） | 不新增字段，直接读 Sources |
+| `Collision_energy: 20` | 无对应标签 | 不是过滤维度，不纳入标签 |
+| `Quality_score: 95` | 无对应标签 | 同上 |
+
+**原则：原有字段保留不删，八维标签新增写入。matchms 解析后两组字段各自独立存在于 metadata 字典中，不冲突。annot-worker 过滤时统一使用八维标签字段名。**
 
 ### 1.3 注释匹配流程（matchms 真实工作逻辑）
 
@@ -93,8 +113,8 @@ Step 7: Level 4 — 分子式推算
 ```
 
 **关键说明：**
-- spectral_metadata.csv 不参与此流程——matchms 直接读 MSP 文件
-- InChIKey 关联发生在 Step 4（元数据富集），不在搜索阶段
+- matchms 直接加载 MSP 文件，不需要中间索引文件
+- 元数据富集（Step 4）使用完整 27 位 InChIKey 优先匹配，匹配不到退化为前 14 位，再匹配不到用 HMDB ID / CAS 号补充关联
 - Level 2 和 Level 3 是完全独立的代码路径，只共享标签过滤逻辑
 - compound_metadata.csv 承担两个角色：Level 3 数据源 + 元数据富集来源
 
@@ -201,30 +221,7 @@ matchms 原生兼容——每行自动解析为 `spectrum.metadata['chemical_cla
 | lipidmaps_id | LipidMaps ID |
 | cas_number | CAS 号 |
 
-### 3.3 spectral_metadata.csv（只读索引，从 MSP 生成）
-
-| 字段 | 说明 |
-|------|------|
-| spectrum_id | 唯一标识 |
-| inchikey | InChIKey（关联化合物库） |
-| name | 化合物名称 |
-| precursor_mz | 前体离子质量 |
-| precursor_type | 加合离子类型 |
-| formula | 分子式 |
-| collision_energy | 碰撞能量 |
-| file_source | MSP 文件名 |
-| num_peaks | 峰数量 |
-| quality_score | 质量评分 |
-| chemical_class | 化学类别 |
-| application | 应用场景 |
-| sample | 样本基质 |
-| confidence | 可信度 |
-| instrument | 仪器类型 |
-| polarity | 离子模式 |
-| reg_lists | 监管清单 |
-| sources | 数据库来源 |
-
-**生成方式**：`scripts/build_spectral_metadata.py` 解析所有 MSP 文件，提取 header 字段 + Tags 行，写入 CSV。任何时候可以从 MSP 文件重新生成。
+*（spectral_metadata.csv 已废弃——其内容被 MSP 内嵌标签 + compound_metadata 完全覆盖，不参与数据处理流程）*
 
 ---
 
@@ -333,10 +330,9 @@ MFSL 的架构与搜索引擎无关——它只负责存储、索引、标签，
 
 ```
 ~/spectral_libraries/
-├── DATABASE_MANUAL.md              # 文档（含来源清单，原 registry.csv 内容并入）
-├── spectral_metadata.csv           # 谱图索引（只读，从 MSP 生成）
-├── compound_metadata.csv           # 化合物元数据（= Level 3 数据）
-├── deduplicated/                   # MSP 峰数据（标签内嵌）
+├── DATABASE_MANUAL.md              # 文档（含来源清单、构建方法、架构说明）
+├── compound_metadata.csv           # 化合物元数据（= Level 3 数据 + 元数据富集来源）
+├── deduplicated/                   # MSP 峰数据（8 维标签内嵌）
 │   ├── massbank_orbitrap_positive.msp
 │   ├── norman_positive.msp
 │   └── ... (50 个文件)
@@ -358,11 +354,11 @@ MFSL 的架构与搜索引擎无关——它只负责存储、索引、标签，
 | 决策 | 理由 |
 |------|------|
 | 标签内嵌 MSP 而非仅存 CSV | 行业标准（MassBank/GNPS/MoNA/FragHub），自包含，不会 MSP/CSV 不同步 |
-| spectral_metadata.csv 是衍生物 | 从 MSP 自动生成，用于快速统计和前端展示，不是搜索必经环节 |
+| 删除 spectral_metadata.csv | 内容已被 MSP 内嵌标签 + compound_metadata 完全覆盖，不参与数据处理流程 |
 | 8 维标签全部适用所有化合物 | reg_lists 对非环境化合物为空值，但保留维度的统一性 |
 | InChIKey 前 14 位跨库匹配 | 前 14 位是分子骨架，立体异构体共享，跨库匹配率从 35% 提升到 65% |
 | 标签只用可信来源填充 | 不猜、不推测——原始库字段、库级别确定性标注、ClassyFire API |
-| 两个库各自独立标签 | 质谱库原有 65% 谱图的化合物不在化合物库里（已通过合并解决） |
+| 两个库各自独立标签 | 质谱库搜索不依赖 compound_metadata，各自按内嵌标签过滤 |
 | compound_metadata 覆盖所有谱图化合物 | 从 MSP 提取 13.6 万"谱图独有"化合物合并到 compound_metadata，实现 100% InChIKey 覆盖 |
 | registry.csv 并入 DATABASE_MANUAL | spectral_metadata.csv 已覆盖其索引功能，registry 降为文档 |
 | 去重保留来源追溯 | Sources 字段记录所有数据库来源，去重不丢信息 |
@@ -418,7 +414,7 @@ MFSL 的架构与搜索引擎无关——它只负责存储、索引、标签，
 | compound_metadata.csv | `xcms-worker/R/annotation_ms1.R` | Level 3 精确质量匹配 |
 | compound_metadata.csv | `annotation_orchestrator.py` Step 4 | 元数据富集（InChIKey → KEGG/HMDB/通路） |
 | MSP 标签字段 | `AnnotationParams.tag_filter` | 前端标签过滤传给后端 |
-| spectral_metadata.csv | 前端统计展示 | 不参与 E2E 搜索流程 |
+| MSP 内嵌标签字段 | `annot-worker` 加载后按 `metadata` 字典过滤 | 搜索前的标签筛选 |
 
 ### 10.2 标签字段名对齐
 
