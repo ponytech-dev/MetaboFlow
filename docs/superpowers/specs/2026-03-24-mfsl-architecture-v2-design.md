@@ -133,16 +133,22 @@ Formula: C8H10N4O2
 InChIKey: RYYVLZVUVIJVGH-UHFFFAOYSA-N
 SMILES: CN1C=NC2=C1C(=O)N(C(=O)N2C)C
 Instrument_type: Orbitrap
+Chemical_class: alkaloid
+Application: pharmaceutical
+Sample: human
+Confidence: experimental
+Reg_lists: eu_watch_list
 Sources: massbank_orbitrap_positive.msp; hmdb_predicted_positive.msp
 Source_count: 2
 Quality_score: 100
-Tags: chemical_class=alkaloid; application=pharmaceutical; sample=human; confidence=experimental; instrument=orbitrap; polarity=positive
 Num Peaks: 15
 53.0386 1234
 ...
 ```
 
-`Tags:` 字段是新增的统一标签行，8 维标签用分号分隔的 key=value 格式存储。
+每个标签维度独立一行。没有值的维度不写（不写空值行）。
+matchms 原生兼容——每行自动解析为 `spectrum.metadata['chemical_class']` 等独立字段，零适配成本。
+经实测验证：matchms `load_from_msp()` 直接识别自定义字段名，空行自动跳过。
 
 ### 3.2 compound_metadata.csv
 
